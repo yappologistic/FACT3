@@ -28,6 +28,7 @@ export function BrowserSurfaceSlot(props: {
     const element = elementRef.current;
     if (!element) return;
     let lease = acquireBrowserSurface(tabId, fitSourceContent);
+    let frameId: number | null = null;
     const update = () => {
       const rect = element.getBoundingClientRect();
       const presentation = presentationRef.current;
@@ -56,16 +57,24 @@ export function BrowserSurfaceSlot(props: {
         );
       }
     };
+    const scheduleVisibleUpdate = () => {
+      if (!presentationRef.current.visible || frameId !== null) return;
+      frameId = window.requestAnimationFrame(() => {
+        frameId = null;
+        update();
+      });
+    };
     updateRef.current = update;
     update();
-    const observer = new ResizeObserver(update);
+    const observer = new ResizeObserver(scheduleVisibleUpdate);
     observer.observe(element);
-    window.addEventListener("resize", update);
-    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", scheduleVisibleUpdate);
+    window.addEventListener("scroll", scheduleVisibleUpdate, true);
     return () => {
       observer.disconnect();
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", scheduleVisibleUpdate);
+      window.removeEventListener("scroll", scheduleVisibleUpdate, true);
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
       if (updateRef.current === update) updateRef.current = null;
       lease.release();
     };
