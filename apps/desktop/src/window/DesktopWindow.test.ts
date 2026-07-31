@@ -96,9 +96,11 @@ function makeFakeBrowserWindow() {
     }),
     restore: vi.fn(),
     setBackgroundColor: vi.fn(),
+    setBackgroundMaterial: vi.fn(),
     setAutoHideCursor: vi.fn(),
     setTitle: vi.fn(),
     setTitleBarOverlay: vi.fn(),
+    setVibrancy: vi.fn(),
     show: vi.fn(),
     webContents,
   };
@@ -117,6 +119,9 @@ function makeFakeBrowserWindow() {
     reload: webContents.reload,
     send: webContents.send,
     setAutoHideCursor: window.setAutoHideCursor,
+    setBackgroundColor: window.setBackgroundColor,
+    setBackgroundMaterial: window.setBackgroundMaterial,
+    setVibrancy: window.setVibrancy,
     webContentsListeners,
     windowListeners,
   };
@@ -367,6 +372,36 @@ const makeSplashScenario = (createOutcomes: readonly (Electron.BrowserWindow | n
   });
 
 describe("DesktopWindow", () => {
+  it("applies and removes native sidebar translucency on Windows", () => {
+    const fakeWindow = makeFakeBrowserWindow();
+    const syncWindowTranslucency = (DesktopWindow as Record<string, unknown>)[
+      "syncWindowTranslucency"
+    ];
+
+    assert.isFunction(syncWindowTranslucency);
+    if (typeof syncWindowTranslucency !== "function") return;
+
+    syncWindowTranslucency(fakeWindow.window, true, "win32", true);
+    assert.deepEqual(fakeWindow.setBackgroundMaterial.mock.calls, [["acrylic"]]);
+    assert.deepEqual(fakeWindow.setBackgroundColor.mock.calls, [["#00000000"]]);
+
+    syncWindowTranslucency(fakeWindow.window, false, "win32", true);
+    assert.deepEqual(fakeWindow.setBackgroundMaterial.mock.calls.at(-1), ["none"]);
+    assert.deepEqual(fakeWindow.setBackgroundColor.mock.calls.at(-1), ["#0a0a0a"]);
+  });
+
+  it("uses native vibrancy for sidebar translucency on macOS", () => {
+    const fakeWindow = makeFakeBrowserWindow();
+
+    DesktopWindow.syncWindowTranslucency(fakeWindow.window, true, "darwin", false);
+    assert.deepEqual(fakeWindow.setVibrancy.mock.calls, [["sidebar"]]);
+    assert.deepEqual(fakeWindow.setBackgroundColor.mock.calls, [["#00000000"]]);
+
+    DesktopWindow.syncWindowTranslucency(fakeWindow.window, false, "darwin", false);
+    assert.deepEqual(fakeWindow.setVibrancy.mock.calls.at(-1), [null]);
+    assert.deepEqual(fakeWindow.setBackgroundColor.mock.calls.at(-1), ["#ffffff"]);
+  });
+
   it("restores bounds only when the window fits within a connected display", () => {
     const persistedBounds = { x: 2040, y: 80, width: 1320, height: 880 };
     const displays = [

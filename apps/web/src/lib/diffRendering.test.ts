@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
-import { buildPatchCacheKey, getDiffLineStat, getRenderablePatch } from "./diffRendering";
+import {
+  buildPatchCacheKey,
+  getDiffLineStat,
+  getRenderablePatch,
+  resolveDiffIndicators,
+  resolveDiffThemeName,
+} from "./diffRendering";
 
 describe("buildPatchCacheKey", () => {
   it("returns a stable cache key for identical content", () => {
@@ -27,6 +33,18 @@ describe("buildPatchCacheKey", () => {
     expect(buildPatchCacheKey(patch, "diff-panel:light")).not.toBe(
       buildPatchCacheKey(patch, "diff-panel:dark"),
     );
+  });
+});
+
+describe("appearance-aware diff rendering", () => {
+  it("selects the preset's matching light and dark syntax themes", () => {
+    expect(resolveDiffThemeName("light", "catppuccin")).toBe("catppuccin-latte");
+    expect(resolveDiffThemeName("dark", "catppuccin")).toBe("catppuccin-mocha");
+    expect(resolveDiffThemeName("dark", "t3-code")).toBe("pierre-dark");
+  });
+
+  it("falls back to color bars when no browser preference is available", () => {
+    expect(resolveDiffIndicators()).toBe("bars");
   });
 });
 

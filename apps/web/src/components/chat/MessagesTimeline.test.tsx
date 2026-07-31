@@ -160,6 +160,7 @@ beforeAll(async () => {
   vi.stubGlobal("document", {
     documentElement: {
       classList,
+      getAttribute: () => null,
       offsetHeight: 0,
     },
   });

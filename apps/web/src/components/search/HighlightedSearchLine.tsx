@@ -131,17 +131,18 @@ function SyntaxHighlightedTokens(props: {
   readonly ranges: ReadonlyArray<Range>;
   readonly theme: "light" | "dark";
 }) {
-  const highlighter = use(getSyntaxHighlighterPromise(props.language));
+  const themeName = resolveDiffThemeName(props.theme);
+  const highlighter = use(getSyntaxHighlighterPromise(props.language, themeName));
   const tokens = useMemo(() => {
     try {
       return highlighter.codeToTokens(props.line, {
         lang: props.language,
-        theme: resolveDiffThemeName(props.theme),
+        theme: themeName,
       }).tokens[0];
     } catch {
       return undefined;
     }
-  }, [highlighter, props.language, props.line, props.theme]);
+  }, [highlighter, props.language, props.line, themeName]);
 
   return tokens ? (
     <HighlightedTokens line={props.line} ranges={props.ranges} tokens={tokens} />

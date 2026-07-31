@@ -1,22 +1,39 @@
-import type { DesktopBridge } from "@t3tools/contracts";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import type { DesktopBridge } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
+import {
+  DEFAULT_APPEARANCE_PREFERENCES,
+  type AppearancePreferences,
+  normalizeAppearancePreferences,
+  resolveSyntaxThemeName,
+  resolveThemeCssVariables,
+  setActiveThemePresetId,
+} from "../lib/themeCatalog";
+
 const ThemePreference = Schema.Literals(["light", "dark", "system"]);
-type Theme = typeof ThemePreference.Type;
+export type Theme = typeof ThemePreference.Type;
+
 type ThemeSnapshot = {
   theme: Theme;
   systemDark: boolean;
+  appearance: AppearancePreferences;
+  appearanceSignature: string;
 };
 
 type DesktopThemeBridge = Pick<DesktopBridge, "setTheme">;
+type DesktopWindowTranslucencyBridge = Pick<DesktopBridge, "setWindowTranslucency">;
 
 const STORAGE_KEY = "t3code:theme";
+export const APPEARANCE_STORAGE_KEY = "t3code:appearance:v1";
 const MEDIA_QUERY = "(prefers-color-scheme: dark)";
+const DEFAULT_APPEARANCE_SIGNATURE = JSON.stringify(DEFAULT_APPEARANCE_PREFERENCES);
 const DEFAULT_THEME_SNAPSHOT: ThemeSnapshot = {
   theme: "system",
   systemDark: false,
+  appearance: DEFAULT_APPEARANCE_PREFERENCES,
+  appearanceSignature: DEFAULT_APPEARANCE_SIGNATURE,
 };
 const THEME_COLOR_META_NAME = "theme-color";
 const DYNAMIC_THEME_COLOR_SELECTOR = `meta[name="${THEME_COLOR_META_NAME}"][data-dynamic-theme-color="true"]`;
@@ -51,11 +68,27 @@ export class DesktopThemeSyncError extends Schema.TaggedErrorClass<DesktopThemeS
 
 export const isDesktopThemeSyncError = Schema.is(DesktopThemeSyncError);
 
+export class DesktopWindowTranslucencySyncError extends Schema.TaggedErrorClass<DesktopWindowTranslucencySyncError>()(
+  "DesktopWindowTranslucencySyncError",
+  {
+    enabled: Schema.Boolean,
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    return `Failed to ${this.enabled ? "enable" : "disable"} desktop window translucency.`;
+  }
+}
+
+export const isDesktopWindowTranslucencySyncError = Schema.is(DesktopWindowTranslucencySyncError);
+
 let listeners: Array<() => void> = [];
+let removeBrowserListeners: (() => void) | null = null;
 let lastSnapshot: ThemeSnapshot | null = null;
 let lastDesktopTheme: Theme | null = null;
-let lastAppliedTheme: ThemeSnapshot | null = null;
-let themeStorageReadFailure: ThemeStorageError | null = null;
+let lastDesktopWindowTranslucency: boolean | null = null;
+let lastAppliedSignature: string | null = null;
+const storageReadFailures = new Map<string, ThemeStorageError>();
 
 function emitChange() {
   for (const listener of listeners) listener();
@@ -69,66 +102,89 @@ function getSystemDark() {
   );
 }
 
-export function readThemePreference(): Theme {
-  if (typeof window === "undefined") return DEFAULT_THEME_SNAPSHOT.theme;
-  let raw: string | null;
+function readStorage(storageKey: string): string | null {
+  if (typeof window === "undefined") return null;
   try {
-    raw = window.localStorage.getItem(STORAGE_KEY);
+    return window.localStorage.getItem(storageKey);
   } catch (cause) {
-    throw new ThemeStorageError({
-      operation: "read",
-      storageKey: STORAGE_KEY,
-      cause,
-    });
+    throw new ThemeStorageError({ operation: "read", storageKey, cause });
   }
+}
+
+function writeStorage(storageKey: string, value: string, theme?: Theme): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(storageKey, value);
+    storageReadFailures.delete(storageKey);
+  } catch (cause) {
+    throw new ThemeStorageError({ operation: "write", storageKey, theme, cause });
+  }
+}
+
+export function readThemePreference(): Theme {
+  const raw = readStorage(STORAGE_KEY);
   if (raw === "light" || raw === "dark" || raw === "system") return raw;
   return DEFAULT_THEME_SNAPSHOT.theme;
 }
 
 export function writeThemePreference(theme: Theme): void {
-  if (typeof window === "undefined") return;
+  writeStorage(STORAGE_KEY, theme, theme);
+  lastSnapshot = null;
+}
+
+export function readAppearancePreferences(): AppearancePreferences {
+  const raw = readStorage(APPEARANCE_STORAGE_KEY);
+  if (!raw) return DEFAULT_APPEARANCE_PREFERENCES;
   try {
-    window.localStorage.setItem(STORAGE_KEY, theme);
-    themeStorageReadFailure = null;
-  } catch (cause) {
-    throw new ThemeStorageError({
-      operation: "write",
-      storageKey: STORAGE_KEY,
-      theme,
-      cause,
-    });
+    return normalizeAppearancePreferences(JSON.parse(raw));
+  } catch {
+    return DEFAULT_APPEARANCE_PREFERENCES;
   }
 }
 
+export function writeAppearancePreferences(preferences: AppearancePreferences): void {
+  writeStorage(APPEARANCE_STORAGE_KEY, JSON.stringify(normalizeAppearancePreferences(preferences)));
+  lastSnapshot = null;
+}
+
+function logStorageFailure(cause: unknown, storageKey: string): ThemeStorageError {
+  const error = isThemeStorageError(cause)
+    ? cause
+    : new ThemeStorageError({ operation: "read", storageKey, cause });
+  storageReadFailures.set(storageKey, error);
+  console.error(error.message, {
+    operation: error.operation,
+    storageKey: error.storageKey,
+    ...safeErrorLogAttributes(error),
+  });
+  return error;
+}
+
 function getStored(): Theme {
-  if (themeStorageReadFailure !== null) {
-    return DEFAULT_THEME_SNAPSHOT.theme;
-  }
+  if (storageReadFailures.has(STORAGE_KEY)) return DEFAULT_THEME_SNAPSHOT.theme;
   try {
     return readThemePreference();
   } catch (cause) {
-    const error = isThemeStorageError(cause)
-      ? cause
-      : new ThemeStorageError({
-          operation: "read",
-          storageKey: STORAGE_KEY,
-          cause,
-        });
-    themeStorageReadFailure = error;
-    console.error(error.message, {
-      operation: error.operation,
-      storageKey: error.storageKey,
-      ...safeErrorLogAttributes(error),
-    });
+    logStorageFailure(cause, STORAGE_KEY);
     return DEFAULT_THEME_SNAPSHOT.theme;
+  }
+}
+
+function getStoredAppearance(): AppearancePreferences {
+  if (storageReadFailures.has(APPEARANCE_STORAGE_KEY)) {
+    return DEFAULT_APPEARANCE_PREFERENCES;
+  }
+  try {
+    return readAppearancePreferences();
+  } catch (cause) {
+    logStorageFailure(cause, APPEARANCE_STORAGE_KEY);
+    return DEFAULT_APPEARANCE_PREFERENCES;
   }
 }
 
 function ensureThemeColorMetaTag(): HTMLMetaElement {
   let element = document.querySelector<HTMLMetaElement>(DYNAMIC_THEME_COLOR_SELECTOR);
-  if (element) {
-    return element;
-  }
+  if (element) return element;
 
   element = document.createElement("meta");
   element.name = THEME_COLOR_META_NAME;
@@ -147,7 +203,6 @@ function normalizeThemeColor(value: string | null | undefined): string | null {
   ) {
     return null;
   }
-
   return value?.trim() ?? null;
 }
 
@@ -161,11 +216,18 @@ function resolveBrowserChromeSurface(): HTMLElement {
 
 export function syncBrowserChromeTheme() {
   if (typeof document === "undefined" || typeof getComputedStyle === "undefined") return;
+  const translucent = document.documentElement.getAttribute("data-translucent-sidebar") === "true";
   const surfaceColor = normalizeThemeColor(
     getComputedStyle(resolveBrowserChromeSurface()).backgroundColor,
   );
   const fallbackColor = normalizeThemeColor(getComputedStyle(document.body).backgroundColor);
   const backgroundColor = surfaceColor ?? fallbackColor;
+  if (translucent) {
+    document.documentElement.style.backgroundColor = "transparent";
+    document.body.style.backgroundColor = "transparent";
+    if (backgroundColor) ensureThemeColorMetaTag().setAttribute("content", backgroundColor);
+    return;
+  }
   if (!backgroundColor) return;
 
   document.documentElement.style.backgroundColor = backgroundColor;
@@ -173,24 +235,47 @@ export function syncBrowserChromeTheme() {
   ensureThemeColorMetaTag().setAttribute("content", backgroundColor);
 }
 
-function applyTheme(theme: Theme, suppressTransitions = false) {
+function applyAppearance(preferences: AppearancePreferences, resolvedTheme: "light" | "dark") {
+  if (typeof document === "undefined") return;
+  setActiveThemePresetId(preferences.presetId);
+  const root = document.documentElement;
+  const style = root.style;
+  if (style && typeof style.setProperty === "function") {
+    for (const [name, value] of Object.entries(
+      resolveThemeCssVariables(preferences, resolvedTheme),
+    )) {
+      style.setProperty(name, value);
+    }
+  }
+  if (typeof root.setAttribute === "function") {
+    root.setAttribute("data-theme-preset", preferences.presetId);
+    root.setAttribute("data-translucent-sidebar", String(preferences.translucentSidebar));
+    root.setAttribute("data-pointer-cursors", String(preferences.pointerCursors));
+    root.setAttribute("data-reduce-motion", preferences.reduceMotion);
+    root.setAttribute("data-diff-markers", preferences.diffMarkers);
+  }
+}
+
+function applyTheme(theme: Theme, appearance: AppearancePreferences, suppressTransitions = false) {
   if (typeof document === "undefined" || typeof window === "undefined") return;
   const systemDark = theme === "system" ? getSystemDark() : false;
-  if (lastAppliedTheme?.theme === theme && lastAppliedTheme.systemDark === systemDark) {
+  const resolvedTheme = theme === "dark" || (theme === "system" && systemDark) ? "dark" : "light";
+  const signature = `${theme}:${systemDark}:${JSON.stringify(appearance)}`;
+  if (lastAppliedSignature === signature) {
     syncDesktopTheme(theme);
+    syncDesktopWindowTranslucency(appearance.translucentSidebar);
     return;
   }
 
-  if (suppressTransitions) {
-    document.documentElement.classList.add("no-transitions");
-  }
-  const isDark = theme === "dark" || (theme === "system" && systemDark);
-  document.documentElement.classList.toggle("dark", isDark);
-  lastAppliedTheme = { theme, systemDark };
+  if (suppressTransitions) document.documentElement.classList.add("no-transitions");
+  document.documentElement.classList.toggle("dark", resolvedTheme === "dark");
+  applyAppearance(appearance, resolvedTheme);
+  lastAppliedSignature = signature;
   syncBrowserChromeTheme();
   syncDesktopTheme(theme);
+  syncDesktopWindowTranslucency(appearance.translucentSidebar);
   if (suppressTransitions) {
-    // Force a reflow so the no-transitions class takes effect before removal
+    // Force a reflow so the no-transitions class takes effect before removal.
     // oxlint-disable-next-line no-unused-expressions
     document.documentElement.offsetHeight;
     requestAnimationFrame(() => {
@@ -213,9 +298,7 @@ export async function syncDesktopThemePreference(
 export function syncDesktopTheme(theme: Theme) {
   if (typeof window === "undefined") return;
   const bridge = window.desktopBridge;
-  if (!bridge || typeof bridge.setTheme !== "function" || lastDesktopTheme === theme) {
-    return;
-  }
+  if (!bridge || typeof bridge.setTheme !== "function" || lastDesktopTheme === theme) return;
 
   lastDesktopTheme = theme;
   void syncDesktopThemePreference(bridge, theme).catch((cause: unknown) => {
@@ -226,27 +309,73 @@ export function syncDesktopTheme(theme: Theme) {
       theme: error.theme,
       ...safeErrorLogAttributes(error),
     });
-    if (lastDesktopTheme === theme) {
-      lastDesktopTheme = null;
-    }
+    if (lastDesktopTheme === theme) lastDesktopTheme = null;
   });
 }
 
-// Apply immediately on module load to prevent flash
+export async function syncDesktopWindowTranslucencyPreference(
+  bridge: DesktopWindowTranslucencyBridge,
+  enabled: boolean,
+): Promise<void> {
+  try {
+    await bridge.setWindowTranslucency(enabled);
+  } catch (cause) {
+    throw new DesktopWindowTranslucencySyncError({ enabled, cause });
+  }
+}
+
+export function syncDesktopWindowTranslucency(enabled: boolean) {
+  if (typeof window === "undefined") return;
+  const bridge = window.desktopBridge;
+  if (
+    !bridge ||
+    typeof bridge.setWindowTranslucency !== "function" ||
+    lastDesktopWindowTranslucency === enabled
+  ) {
+    return;
+  }
+
+  lastDesktopWindowTranslucency = enabled;
+  void syncDesktopWindowTranslucencyPreference(bridge, enabled).catch((cause: unknown) => {
+    const error = isDesktopWindowTranslucencySyncError(cause)
+      ? cause
+      : new DesktopWindowTranslucencySyncError({ enabled, cause });
+    console.error(error.message, {
+      enabled: error.enabled,
+      ...safeErrorLogAttributes(error),
+    });
+    if (lastDesktopWindowTranslucency === enabled) lastDesktopWindowTranslucency = null;
+  });
+}
+
+// Apply immediately on module load to prevent a flash of the default palette.
 if (typeof document !== "undefined" && typeof window !== "undefined") {
-  applyTheme(getStored());
+  applyTheme(getStored(), getStoredAppearance());
 }
 
 function getSnapshot(): ThemeSnapshot {
   if (typeof window === "undefined") return DEFAULT_THEME_SNAPSHOT;
+  if (lastSnapshot) return lastSnapshot;
+
   const theme = getStored();
+  const appearance = getStoredAppearance();
+  return updateSnapshot(theme, appearance);
+}
+
+function updateSnapshot(theme: Theme, appearance: AppearancePreferences): ThemeSnapshot {
+  const appearanceSignature = JSON.stringify(appearance);
   const systemDark = theme === "system" ? getSystemDark() : false;
 
-  if (lastSnapshot && lastSnapshot.theme === theme && lastSnapshot.systemDark === systemDark) {
+  if (
+    lastSnapshot &&
+    lastSnapshot.theme === theme &&
+    lastSnapshot.systemDark === systemDark &&
+    lastSnapshot.appearanceSignature === appearanceSignature
+  ) {
     return lastSnapshot;
   }
 
-  lastSnapshot = { theme, systemDark };
+  lastSnapshot = { theme, systemDark, appearance, appearanceSignature };
   return lastSnapshot;
 }
 
@@ -258,35 +387,49 @@ function subscribe(listener: () => void): () => void {
   if (typeof window === "undefined") return () => {};
   listeners.push(listener);
 
-  // Listen for system preference changes
-  const mq = typeof window.matchMedia === "function" ? window.matchMedia(MEDIA_QUERY) : null;
-  const handleChange = () => {
-    if (getStored() === "system") applyTheme("system", true);
-    emitChange();
-  };
-  mq?.addEventListener("change", handleChange);
-
-  // Listen for storage changes from other tabs
-  const handleStorage = (e: StorageEvent) => {
-    if (e.key === STORAGE_KEY) {
-      themeStorageReadFailure = null;
-      applyTheme(getStored(), true);
+  if (removeBrowserListeners === null) {
+    const mq = typeof window.matchMedia === "function" ? window.matchMedia(MEDIA_QUERY) : null;
+    const handleChange = () => {
+      const theme = getStored();
+      const appearance = getStoredAppearance();
+      if (theme === "system") applyTheme(theme, appearance, true);
+      updateSnapshot(theme, appearance);
       emitChange();
-    }
-  };
-  window.addEventListener("storage", handleStorage);
+    };
+    mq?.addEventListener("change", handleChange);
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY && event.key !== APPEARANCE_STORAGE_KEY) return;
+      if (event.key) storageReadFailures.delete(event.key);
+      const theme = getStored();
+      const appearance = getStoredAppearance();
+      applyTheme(theme, appearance, true);
+      updateSnapshot(theme, appearance);
+      emitChange();
+    };
+    window.addEventListener("storage", handleStorage);
+
+    removeBrowserListeners = () => {
+      mq?.removeEventListener("change", handleChange);
+      window.removeEventListener("storage", handleStorage);
+      removeBrowserListeners = null;
+    };
+  }
 
   return () => {
-    listeners = listeners.filter((l) => l !== listener);
-    mq?.removeEventListener("change", handleChange);
-    window.removeEventListener("storage", handleStorage);
+    listeners = listeners.filter((candidate) => candidate !== listener);
+    if (listeners.length === 0) {
+      removeBrowserListeners?.();
+      // A system-theme change can happen while no consumer is mounted. Make
+      // the next mount re-read both the media query and persisted preferences.
+      lastSnapshot = null;
+    }
   };
 }
 
 export function useTheme() {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const theme = snapshot.theme;
-
+  const { theme, appearance } = snapshot;
   const resolvedTheme: "light" | "dark" =
     theme === "system" ? (snapshot.systemDark ? "dark" : "light") : theme;
 
@@ -311,14 +454,53 @@ export function useTheme() {
       });
       return;
     }
-    applyTheme(next, true);
+    const appearance = getStoredAppearance();
+    applyTheme(next, appearance, true);
+    updateSnapshot(next, appearance);
     emitChange();
   }, []);
 
-  // Keep DOM in sync on mount/change
-  useEffect(() => {
-    applyTheme(theme);
-  }, [theme]);
+  const setAppearance = useCallback(
+    (next: AppearancePreferences | ((current: AppearancePreferences) => AppearancePreferences)) => {
+      if (typeof window === "undefined") return;
+      const normalized = normalizeAppearancePreferences(
+        typeof next === "function" ? next(appearance) : next,
+      );
+      try {
+        writeAppearancePreferences(normalized);
+      } catch (cause) {
+        const error = isThemeStorageError(cause)
+          ? cause
+          : new ThemeStorageError({
+              operation: "write",
+              storageKey: APPEARANCE_STORAGE_KEY,
+              cause,
+            });
+        console.error(error.message, {
+          operation: error.operation,
+          storageKey: error.storageKey,
+          ...safeErrorLogAttributes(error),
+        });
+        return;
+      }
+      applyTheme(theme, normalized, true);
+      updateSnapshot(theme, normalized);
+      emitChange();
+    },
+    [appearance, theme],
+  );
 
-  return { theme, setTheme, resolvedTheme } as const;
+  useEffect(() => {
+    applyTheme(theme, appearance);
+  }, [appearance, theme]);
+
+  return {
+    theme,
+    setTheme,
+    resolvedTheme,
+    appearance,
+    setAppearance,
+    syntaxTheme: resolveSyntaxThemeName(resolvedTheme, appearance.presetId),
+    diffIndicators: appearance.diffMarkers === "symbols" ? ("classic" as const) : ("bars" as const),
+  } as const;
 }

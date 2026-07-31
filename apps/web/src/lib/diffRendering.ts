@@ -1,15 +1,30 @@
 import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
-import type { FileDiffMetadata } from "@pierre/diffs/types";
+import type { DiffsThemeNames, FileDiffMetadata } from "@pierre/diffs/types";
+
+import { type ThemePresetId, resolveSyntaxThemeName } from "./themeCatalog";
 
 export const DIFF_THEME_NAMES = {
   light: "pierre-light",
   dark: "pierre-dark",
 } as const;
 
-export type DiffThemeName = (typeof DIFF_THEME_NAMES)[keyof typeof DIFF_THEME_NAMES];
+export type DiffThemeName = DiffsThemeNames;
 
-export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
-  return theme === "dark" ? DIFF_THEME_NAMES.dark : DIFF_THEME_NAMES.light;
+export function resolveDiffThemeName(
+  theme: "light" | "dark",
+  presetId?: ThemePresetId,
+): DiffThemeName {
+  return resolveSyntaxThemeName(theme, presetId);
+}
+
+export function resolveDiffIndicators(): "bars" | "classic" {
+  if (
+    typeof document !== "undefined" &&
+    document.documentElement.getAttribute("data-diff-markers") === "symbols"
+  ) {
+    return "classic";
+  }
+  return "bars";
 }
 
 const FNV_OFFSET_BASIS_32 = 0x811c9dc5;

@@ -36,6 +36,7 @@ import { type TurnDiffSummary } from "../../types";
 import {
   getRenderablePatch,
   resolveDiffThemeName,
+  resolveDiffIndicators,
   resolveFileDiffPath,
 } from "../../lib/diffRendering";
 import ChatMarkdown from "../ChatMarkdown";
@@ -1666,6 +1667,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
             options={{
               collapsed: false,
               diffStyle: "unified",
+              diffIndicators: resolveDiffIndicators(),
               theme: resolveDiffThemeName(ctx.resolvedTheme),
             }}
           />

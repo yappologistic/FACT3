@@ -80,6 +80,7 @@ export class DesktopWindow extends Context.Service<
     readonly handleBackendNotReady: Effect.Effect<void>;
     readonly flushMainWindowBounds: Effect.Effect<void>;
     readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
+    readonly setWindowTranslucency: (enabled: boolean) => Effect.Effect<void>;
     readonly syncAppearance: Effect.Effect<void>;
   }
 >()("@t3tools/desktop/window/DesktopWindow") {}
@@ -101,6 +102,24 @@ function getIconOption(
 
 function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
   return shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
+}
+
+export function syncWindowTranslucency(
+  window: Electron.BrowserWindow,
+  enabled: boolean,
+  platform: NodeJS.Platform,
+  shouldUseDarkColors: boolean,
+): void {
+  if (window.isDestroyed()) return;
+
+  if (platform === "win32") {
+    window.setBackgroundMaterial(enabled ? "acrylic" : "none");
+  } else if (platform === "darwin") {
+    window.setVibrancy(enabled ? "sidebar" : null);
+  }
+  window.setBackgroundColor(
+    enabled ? "#00000000" : getInitialWindowBackgroundColor(shouldUseDarkColors),
+  );
 }
 
 type DisplayBounds = Pick<Electron.Rectangle, "x" | "y" | "width" | "height">;
@@ -206,13 +225,14 @@ function syncWindowAppearance(
   window: Electron.BrowserWindow,
   shouldUseDarkColors: boolean,
   platform: NodeJS.Platform,
+  translucent: boolean,
 ): Effect.Effect<void> {
   return Effect.sync(() => {
     if (window.isDestroyed()) {
       return;
     }
 
-    window.setBackgroundColor(getInitialWindowBackgroundColor(shouldUseDarkColors));
+    syncWindowTranslucency(window, translucent, platform, shouldUseDarkColors);
     const { titleBarOverlay } = getWindowTitleBarOptions(shouldUseDarkColors, platform);
     if (typeof titleBarOverlay === "object") {
       window.setTitleBarOverlay(titleBarOverlay);
@@ -252,6 +272,7 @@ export const make = Effect.gen(function* () {
   // createMainIfBackendReady, which gates the post-readiness window
   // open in development and the macOS "activate without windows" path.
   const backendReadyRef = yield* Ref.make(false);
+  const windowTranslucencyRef = yield* Ref.make(false);
   // The transient "Connecting to WSL" splash window, tracked separately so it
   // is never mistaken for the real main window.
   const splashWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
@@ -787,10 +808,20 @@ export const make = Effect.gen(function* () {
 
       send();
     }),
-    syncAppearance: Effect.gen(function* () {
+    setWindowTranslucency: Effect.fn("desktop.window.setWindowTranslucency")(function* (enabled) {
+      yield* Ref.set(windowTranslucencyRef, enabled);
       const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
       yield* electronWindow.syncAllAppearance((window) =>
-        syncWindowAppearance(window, shouldUseDarkColors, environment.platform),
+        Effect.sync(() =>
+          syncWindowTranslucency(window, enabled, environment.platform, shouldUseDarkColors),
+        ),
+      );
+    }),
+    syncAppearance: Effect.gen(function* () {
+      const shouldUseDarkColors = yield* electronTheme.shouldUseDarkColors;
+      const translucent = yield* Ref.get(windowTranslucencyRef);
+      yield* electronWindow.syncAllAppearance((window) =>
+        syncWindowAppearance(window, shouldUseDarkColors, environment.platform, translucent),
       );
     }).pipe(Effect.withSpan("desktop.window.syncAppearance")),
   });

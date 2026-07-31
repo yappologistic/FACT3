@@ -391,8 +391,7 @@ export function TerminalViewport({
       lineHeight: 1,
       fontSize: 12,
       scrollback: 5_000,
-      fontFamily:
-        '"SF Mono", "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace',
+      fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim(),
       theme: terminalThemeFromApp(mount),
     });
     terminal.loadAddon(fitAddon);
@@ -696,6 +695,11 @@ export function TerminalViewport({
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) return;
       activeTerminal.options.theme = terminalThemeFromApp(containerRef.current);
+      activeTerminal.options.fontFamily = getComputedStyle(document.documentElement)
+        .getPropertyValue("--font-mono")
+        .trim();
+      const activeFitAddon = fitAddonRef.current;
+      if (activeFitAddon) fitTerminalSafely(activeFitAddon);
       activeTerminal.refresh(0, activeTerminal.rows - 1);
     });
     themeObserver.observe(document.documentElement, {

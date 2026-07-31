@@ -33,6 +33,7 @@ import {
   getDiffLineStat,
   getRenderablePatch,
   resolveDiffThemeName,
+  resolveDiffIndicators,
   resolveFileDiffPath,
 } from "../lib/diffRendering";
 import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "../lib/diffCollapse";
@@ -917,6 +918,7 @@ export default function DiffPanel({
                   }}
                   options={{
                     diffStyle: diffRenderMode === "split" ? "split" : "unified",
+                    diffIndicators: resolveDiffIndicators(),
                     lineDiffType: "none",
                     overflow: wordWrap ? "wrap" : "scroll",
                     theme: resolveDiffThemeName(resolvedTheme),
