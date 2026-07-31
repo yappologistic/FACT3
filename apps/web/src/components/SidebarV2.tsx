@@ -5,6 +5,7 @@ import {
   effectiveSettled,
   effectiveSnoozed,
   threadWokeAt,
+  type ChangeRequestSettlementSignal,
 } from "@t3tools/client-runtime/state/thread-settled";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import {
@@ -419,7 +420,11 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   onUnsettle: (threadRef: ScopedThreadRef) => void;
   onSnooze: (threadRef: ScopedThreadRef, preset: SnoozePreset) => void;
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
-  onChangeRequestState: (threadKey: string, state: "open" | "closed" | "merged" | null) => void;
+  onChangeRequestState: (
+    threadKey: string,
+    state: "open" | "closed" | "merged" | null,
+    updatedAt: string | null,
+  ) => void;
 }) {
   const {
     isRenaming,
@@ -546,9 +551,10 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   // Report the PR state up: the parent partitions rows with effectiveSettled,
   // and a merged/closed PR auto-settles a thread — data only rows have.
   const prState = pr?.state ?? null;
+  const prUpdatedAt = pr?.updatedAt ?? null;
   useEffect(() => {
-    onChangeRequestState(threadKey, prState);
-  }, [onChangeRequestState, prState, threadKey]);
+    onChangeRequestState(threadKey, prState, prUpdatedAt);
+  }, [onChangeRequestState, prState, prUpdatedAt, threadKey]);
 
   const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
   const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
@@ -1249,18 +1255,20 @@ export default function SidebarV2() {
 
   // PR states stream in per-row (rows own the VCS subscriptions); a merged or
   // closed PR auto-settles its thread on the next partition.
-  const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
-    ReadonlyMap<string, "open" | "closed" | "merged">
+  const [changeRequestSignalByKey, setChangeRequestSignalByKey] = useState<
+    ReadonlyMap<string, ChangeRequestSettlementSignal>
   >(() => new Map());
   const handleChangeRequestState = useCallback(
-    (threadKey: string, state: "open" | "closed" | "merged" | null) => {
-      setChangeRequestStateByKey((current) => {
-        if ((current.get(threadKey) ?? null) === state) return current;
+    (threadKey: string, state: "open" | "closed" | "merged" | null, updatedAt: string | null) => {
+      setChangeRequestSignalByKey((current) => {
+        const existing = current.get(threadKey);
+        if (existing?.state === state && existing.updatedAt === updatedAt) return current;
+        if (existing === undefined && state === null) return current;
         const next = new Map(current);
         if (state === null) {
           next.delete(threadKey);
         } else {
-          next.set(threadKey, state);
+          next.set(threadKey, { state, updatedAt });
         }
         return next;
       });
@@ -1484,7 +1492,7 @@ export default function SidebarV2() {
       const supportsSnooze =
         serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
       const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-      const changeRequestState = changeRequestStateByKey.get(threadKey) ?? null;
+      const changeRequestSignal = changeRequestSignalByKey.get(threadKey) ?? null;
       // Snooze outranks settled classification: an explicitly snoozed thread
       // belongs to the shelf even if it would also auto-settle (the shelf's
       // wake time is a stronger statement about when it matters again).
@@ -1492,7 +1500,12 @@ export default function SidebarV2() {
         snoozed.push(thread);
       } else if (
         supportsSettlement &&
-        effectiveSettled(thread, { now, autoSettleAfterDays, changeRequestState })
+        effectiveSettled(thread, {
+          now,
+          autoSettleAfterDays,
+          changeRequestState: changeRequestSignal?.state ?? null,
+          changeRequestUpdatedAt: changeRequestSignal?.updatedAt ?? null,
+        })
       ) {
         settled.push(thread);
       } else {
@@ -1512,7 +1525,7 @@ export default function SidebarV2() {
     };
   }, [
     autoSettleAfterDays,
-    changeRequestStateByKey,
+    changeRequestSignalByKey,
     nowMinute,
     scopedProjectKeys,
     serverConfigs,

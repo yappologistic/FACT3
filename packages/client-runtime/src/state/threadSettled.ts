@@ -2,6 +2,11 @@ import type { OrchestrationThreadShell } from "@t3tools/contracts";
 
 export type ChangeRequestStateLike = "open" | "closed" | "merged";
 
+export interface ChangeRequestSettlementSignal {
+  readonly state: ChangeRequestStateLike;
+  readonly updatedAt: string | null;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1_000;
 
 export function threadLastActivityAt(shell: OrchestrationThreadShell): string | null {
@@ -221,9 +226,10 @@ export function threadWokeAt(
  * override. Past the blockers, the explicit user override (thread.settle /
  * thread.unsettle commands, projected into settledOverride + settledAt)
  * wins in both directions; without one, a thread auto-settles on a
- * merged/closed PR immediately or on inactivity past the window. The server
- * un-settles on real activity (user message, session start, approval/
- * user-input request), so an override never goes stale silently.
+ * merged/closed PR unless the conversation continued after that PR update,
+ * or on inactivity past the window. The server un-settles on real activity
+ * (user message, session start, approval/user-input request), so an override
+ * never goes stale silently.
  */
 export function effectiveSettled(
   shell: OrchestrationThreadShell,
@@ -231,6 +237,7 @@ export function effectiveSettled(
     readonly now: string;
     readonly autoSettleAfterDays: number | null;
     readonly changeRequestState?: ChangeRequestStateLike | null;
+    readonly changeRequestUpdatedAt?: string | null;
   },
 ): boolean {
   // Blocked work must remain visible even when a user explicitly settled it.
@@ -257,7 +264,19 @@ export function effectiveSettled(
   // until real activity clears it server-side.
   if (shell.settledOverride === "active") return false;
   if (options.changeRequestState === "merged" || options.changeRequestState === "closed") {
-    return true;
+    // A merged/closed PR is a one-time completion signal, not a permanent
+    // settled state. If the conversation continued afterward, ignore that
+    // older signal and let ordinary inactivity decide when to settle again.
+    // Missing timestamps preserve behavior with older servers; malformed
+    // timestamps fail open so corrupt data cannot hide an active thread.
+    if (options.changeRequestUpdatedAt == null) return true;
+    const changeRequestUpdatedAtMs = Date.parse(options.changeRequestUpdatedAt);
+    if (!Number.isNaN(changeRequestUpdatedAtMs)) {
+      const lastActivityAt = threadLastActivityAt(shell);
+      if (lastActivityAt === null || Date.parse(lastActivityAt) <= changeRequestUpdatedAtMs) {
+        return true;
+      }
+    }
   }
   if (options.autoSettleAfterDays === null) return false;
 

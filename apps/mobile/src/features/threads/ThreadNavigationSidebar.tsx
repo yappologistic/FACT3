@@ -3,6 +3,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import type { ChangeRequestSettlementSignal } from "@t3tools/client-runtime/state/thread-settled";
 import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
@@ -395,18 +396,20 @@ function ThreadNavigationSidebarPane(
   // (HomeScreen.tsx): flat creation-order card block + settled recency tail.
   // PR states stream in per-row; merged/closed PRs auto-settle their thread
   // on the next partition.
-  const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
-    ReadonlyMap<string, "open" | "closed" | "merged">
+  const [changeRequestSignalByKey, setChangeRequestSignalByKey] = useState<
+    ReadonlyMap<string, ChangeRequestSettlementSignal>
   >(() => new Map());
   const handleChangeRequestState = useCallback(
-    (threadKey: string, state: "open" | "closed" | "merged" | null) => {
-      setChangeRequestStateByKey((current) => {
-        if ((current.get(threadKey) ?? null) === state) return current;
+    (threadKey: string, state: "open" | "closed" | "merged" | null, updatedAt: string | null) => {
+      setChangeRequestSignalByKey((current) => {
+        const existing = current.get(threadKey);
+        if (existing?.state === state && existing.updatedAt === updatedAt) return current;
+        if (existing === undefined && state === null) return current;
         const next = new Map(current);
         if (state === null) {
           next.delete(threadKey);
         } else {
-          next.set(threadKey, state);
+          next.set(threadKey, { state, updatedAt });
         }
         return next;
       });
@@ -475,7 +478,7 @@ function ThreadNavigationSidebarPane(
       projectRefs: selectedProjectScope === null ? null : selectedProjectScope.projectRefs,
       searchQuery: props.searchQuery,
       matchedThreadKeys,
-      changeRequestStateByKey,
+      changeRequestSignalByKey,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
       settledLimit: settledVisibleCount,
@@ -483,7 +486,7 @@ function ThreadNavigationSidebarPane(
       snoozeNow: new Date().toISOString(),
     });
   }, [
-    changeRequestStateByKey,
+    changeRequestSignalByKey,
     nowMinute,
     snoozeWakeTick,
     options.selectedEnvironmentId,

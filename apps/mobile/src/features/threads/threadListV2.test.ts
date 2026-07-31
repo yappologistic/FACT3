@@ -218,6 +218,29 @@ describe("buildThreadListV2Items", () => {
     expect(items.map((item) => item.isLast)).toEqual([false, false, true]);
   });
 
+  it("keeps post-merge conversation activity in the active card block", () => {
+    const thread = makeThread({
+      id: ThreadId.make("continued-after-merge"),
+      title: "Continued after merge",
+      latestUserMessageAt: "2026-06-01T12:05:00.000Z",
+    });
+    const { items } = buildThreadListV2Items({
+      threads: [thread],
+      environmentId: null,
+      searchQuery: "",
+      now: NOW,
+      changeRequestSignalByKey: new Map([
+        [
+          `${environmentId}:${thread.id}`,
+          { state: "merged", updatedAt: "2026-06-01T12:00:00.000Z" },
+        ],
+      ]),
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]?.variant).toBe("card");
+  });
+
   it("keeps cards in creation order while settled sorts by recency", () => {
     const { items } = buildThreadListV2Items({
       threads: [

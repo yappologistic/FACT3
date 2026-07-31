@@ -7,6 +7,7 @@ import {
   GitRunStackedActionResult,
   GitRunStackedActionInput,
   GitResolvePullRequestResult,
+  VcsStatusResult,
 } from "./git.ts";
 
 const decodeCreateWorktreeInput = Schema.decodeUnknownSync(VcsCreateWorktreeInput);
@@ -16,6 +17,34 @@ const decodePreparePullRequestThreadInput = Schema.decodeUnknownSync(
 const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedActionInput);
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult);
 const decodeResolvePullRequestResult = Schema.decodeUnknownSync(GitResolvePullRequestResult);
+const decodeVcsStatusResult = Schema.decodeUnknownSync(VcsStatusResult);
+
+describe("VcsStatusResult", () => {
+  it("preserves a change request update timestamp when the server provides one", () => {
+    const parsed = decodeVcsStatusResult({
+      isRepo: true,
+      hasPrimaryRemote: true,
+      isDefaultRef: false,
+      refName: "feature/continued-conversation",
+      hasWorkingTreeChanges: false,
+      workingTree: { files: [], insertions: 0, deletions: 0 },
+      hasUpstream: true,
+      aheadCount: 0,
+      behindCount: 0,
+      pr: {
+        number: 42,
+        title: "Finish the original work",
+        url: "https://github.com/example/repo/pull/42",
+        baseRef: "main",
+        headRef: "feature/continued-conversation",
+        state: "merged",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+      },
+    });
+
+    expect(parsed.pr?.updatedAt).toBe("2026-04-09T12:00:00.000Z");
+  });
+});
 
 describe("VcsCreateWorktreeInput", () => {
   it("accepts omitted newRefName for existing-refName worktrees", () => {

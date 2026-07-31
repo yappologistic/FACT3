@@ -517,6 +517,7 @@ function toStatusPr(pr: PullRequestInfo): {
   baseRef: string;
   headRef: string;
   state: "open" | "closed" | "merged";
+  updatedAt?: string;
 } {
   return {
     number: pr.number,
@@ -525,6 +526,9 @@ function toStatusPr(pr: PullRequestInfo): {
     baseRef: pr.baseRefName,
     headRef: pr.headRefName,
     state: pr.state,
+    ...(pr.state !== "open" && Option.isSome(pr.updatedAt)
+      ? { updatedAt: DateTime.formatIso(pr.updatedAt.value) }
+      : {}),
   };
 }
 

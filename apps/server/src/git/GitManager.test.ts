@@ -855,6 +855,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         baseRef: "main",
         headRef: "feature/status-lowercase-state",
         state: "merged",
+        updatedAt: "2026-01-02T00:00:00.000Z",
       });
     }),
   );
@@ -1210,6 +1211,7 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
         baseRef: "main",
         headRef: "feature/status-merged-pr",
         state: "merged",
+        updatedAt: "2026-01-30T10:00:00.000Z",
       });
     }),
   );

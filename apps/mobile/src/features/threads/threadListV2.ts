@@ -1,4 +1,8 @@
-import { effectiveSettled, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import {
+  effectiveSettled,
+  effectiveSnoozed,
+  type ChangeRequestSettlementSignal,
+} from "@t3tools/client-runtime/state/thread-settled";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
@@ -185,8 +189,8 @@ export function buildThreadListV2Items(input: {
   }> | null;
   readonly searchQuery: string;
   readonly matchedThreadKeys?: ReadonlySet<string>;
-  /** Per-row PR state reported up by visible rows ("env:threadId" keys). */
-  readonly changeRequestStateByKey?: ReadonlyMap<string, "open" | "closed" | "merged">;
+  /** Per-row PR signal reported up by visible rows ("env:threadId" keys). */
+  readonly changeRequestSignalByKey?: ReadonlyMap<string, ChangeRequestSettlementSignal>;
   /** Environments whose server supports thread.settle/unsettle. Threads on
       other environments never classify as settled — the user could neither
       un-settle nor pin them. Absent = no gating (tests). */
@@ -238,8 +242,8 @@ export function buildThreadListV2Items(input: {
     }
     const supportsSettlement = input.settlementEnvironmentIds?.has(thread.environmentId) ?? true;
     const supportsSnooze = input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true;
-    const changeRequestState =
-      input.changeRequestStateByKey?.get(`${thread.environmentId}:${thread.id}`) ?? null;
+    const changeRequestSignal =
+      input.changeRequestSignalByKey?.get(`${thread.environmentId}:${thread.id}`) ?? null;
     // Visibility parity with web: a snoozed thread leaves the list until it
     // wakes (or raises its hand — effectiveSnoozed refuses blocked/failed
     // work). Snooze outranks settled classification, same as web.
@@ -256,7 +260,12 @@ export function buildThreadListV2Items(input: {
     }
     if (
       supportsSettlement &&
-      effectiveSettled(thread, { now, autoSettleAfterDays, changeRequestState })
+      effectiveSettled(thread, {
+        now,
+        autoSettleAfterDays,
+        changeRequestState: changeRequestSignal?.state ?? null,
+        changeRequestUpdatedAt: changeRequestSignal?.updatedAt ?? null,
+      })
     ) {
       settled.push(thread);
     } else {

@@ -243,6 +243,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly onChangeRequestState?: (
     threadKey: string,
     state: "open" | "closed" | "merged" | null,
+    updatedAt: string | null,
   ) => void;
   readonly projectCwd?: string | null;
   readonly searchMatch?: EnvironmentThreadSearchMatch;
@@ -265,10 +266,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
 
   const pr = useThreadPr(thread, props.projectCwd ?? props.project?.workspaceRoot ?? null);
   const prState = pr?.state ?? null;
+  const prUpdatedAt = pr?.updatedAt ?? null;
   const threadKey = `${thread.environmentId}:${thread.id}`;
   useEffect(() => {
-    onChangeRequestState?.(threadKey, prState);
-  }, [onChangeRequestState, prState, threadKey]);
+    onChangeRequestState?.(threadKey, prState, prUpdatedAt);
+  }, [onChangeRequestState, prState, prUpdatedAt, threadKey]);
 
   const screenColor = useThemeColor("--color-screen");
   const drawerColor = useThemeColor("--color-drawer");

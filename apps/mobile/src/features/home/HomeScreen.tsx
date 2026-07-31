@@ -7,6 +7,7 @@ import {
   type EnvironmentProject,
   type EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import type { ChangeRequestSettlementSignal } from "@t3tools/client-runtime/state/thread-settled";
 import {
   threadSearchMatchKey,
   type EnvironmentThreadSearchMatch,
@@ -470,18 +471,20 @@ export function HomeScreen(props: HomeScreenProps) {
   // optimistic holds.
   // PR states stream in per-row (rows own the VCS subscriptions); a merged or
   // closed PR auto-settles its thread on the next partition (mirrors web).
-  const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
-    ReadonlyMap<string, "open" | "closed" | "merged">
+  const [changeRequestSignalByKey, setChangeRequestSignalByKey] = useState<
+    ReadonlyMap<string, ChangeRequestSettlementSignal>
   >(() => new Map());
   const handleChangeRequestState = useCallback(
-    (threadKey: string, state: "open" | "closed" | "merged" | null) => {
-      setChangeRequestStateByKey((current) => {
-        if ((current.get(threadKey) ?? null) === state) return current;
+    (threadKey: string, state: "open" | "closed" | "merged" | null, updatedAt: string | null) => {
+      setChangeRequestSignalByKey((current) => {
+        const existing = current.get(threadKey);
+        if (existing?.state === state && existing.updatedAt === updatedAt) return current;
+        if (existing === undefined && state === null) return current;
         const next = new Map(current);
         if (state === null) {
           next.delete(threadKey);
         } else {
-          next.set(threadKey, state);
+          next.set(threadKey, { state, updatedAt });
         }
         return next;
       });
@@ -560,7 +563,7 @@ export function HomeScreen(props: HomeScreenProps) {
       projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
       searchQuery: props.searchQuery,
       matchedThreadKeys,
-      changeRequestStateByKey,
+      changeRequestSignalByKey,
       settlementEnvironmentIds,
       snoozeEnvironmentIds,
       settledLimit: settledVisibleCount,
@@ -568,7 +571,7 @@ export function HomeScreen(props: HomeScreenProps) {
       snoozeNow: new Date().toISOString(),
     });
   }, [
-    changeRequestStateByKey,
+    changeRequestSignalByKey,
     nowMinute,
     snoozeWakeTick,
     settledVisibleCount,

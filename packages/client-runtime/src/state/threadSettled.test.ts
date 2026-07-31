@@ -176,6 +176,32 @@ describe("effectiveSettled", () => {
     }
   });
 
+  it("keeps a conversation active when it continues after the change request settled", () => {
+    const continuedConversation = makeShell({ activityAt: "2026-04-09T12:05:00.000Z" });
+
+    expect(
+      effectiveSettled(continuedConversation, {
+        now: NOW,
+        autoSettleAfterDays: 3,
+        changeRequestState: "merged",
+        changeRequestUpdatedAt: "2026-04-09T12:00:00.000Z",
+      }),
+    ).toBe(false);
+  });
+
+  it("still settles when the change request update is newer than the conversation", () => {
+    const completedConversation = makeShell({ activityAt: "2026-04-09T11:55:00.000Z" });
+
+    expect(
+      effectiveSettled(completedConversation, {
+        now: NOW,
+        autoSettleAfterDays: 3,
+        changeRequestState: "merged",
+        changeRequestUpdatedAt: "2026-04-09T12:00:00.000Z",
+      }),
+    ).toBe(true);
+  });
+
   it("keeps an explicitly un-settled merged-PR thread active", () => {
     const shell = makeShell({
       settledOverride: "active",
