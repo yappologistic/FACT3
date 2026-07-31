@@ -295,11 +295,14 @@ export function isLatestTurnSettled(
   latestTurn: LatestTurnTiming | null,
   session: SessionActivityState | null,
 ): boolean {
-  if (!latestTurn?.startedAt) return false;
-  if (!latestTurn.completedAt) return false;
-  if (!session) return true;
-  if (session.status === "running") return false;
-  return true;
+  if (session?.status === "starting" || session?.status === "running") return false;
+  if (!latestTurn) return true;
+  if (latestTurn.startedAt && latestTurn.completedAt) return true;
+  return (
+    session?.status === "interrupted" ||
+    session?.status === "stopped" ||
+    session?.status === "error"
+  );
 }
 
 export function deriveActiveWorkStartedAt(

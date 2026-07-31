@@ -1612,6 +1612,36 @@ describe("isLatestTurnSettled", () => {
     ).toBe(true);
   });
 
+  it("treats an idle thread without a materialized turn as settled", () => {
+    expect(
+      isLatestTurnSettled(null, {
+        status: "ready",
+        activeTurnId: null,
+      }),
+    ).toBe(true);
+  });
+
+  it("settles an incomplete turn after cancellation or failure", () => {
+    const incompleteTurn = {
+      turnId: TurnId.make("turn-cancelled"),
+      startedAt: "2026-02-27T21:10:00.000Z",
+      completedAt: null,
+    } as const;
+
+    expect(
+      isLatestTurnSettled(incompleteTurn, {
+        status: "interrupted",
+        activeTurnId: null,
+      }),
+    ).toBe(true);
+    expect(
+      isLatestTurnSettled(incompleteTurn, {
+        status: "error",
+        activeTurnId: null,
+      }),
+    ).toBe(true);
+  });
+
   it("returns false when turn timestamps are incomplete", () => {
     expect(
       isLatestTurnSettled(
