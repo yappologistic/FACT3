@@ -24,6 +24,7 @@ import {
 import { flushSync } from "react-dom";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
+import { ThinkingOrb } from "thinking-orbs";
 import {
   deriveTimelineEntries,
   workEntryIndicatesToolFailure,
@@ -118,7 +119,7 @@ import {
 // Context — shared state consumed by every row component via Context.
 // Propagates through LegendList's memo boundaries for shared callbacks and
 // non-row-scoped state. `nowIso` is intentionally excluded — self-ticking
-// components (WorkingTimer, LiveElapsed) handle it.
+// components such as LiveElapsed handle it.
 // ---------------------------------------------------------------------------
 
 interface TimelineRowSharedState {
@@ -220,6 +221,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
 }: MessagesTimelineProps) {
+  const showWorkingIndicator = activeTurnInProgress;
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
@@ -306,7 +308,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         runningTurnId,
         expandedTurnIds,
         expandedWorkGroupIds,
-        isWorking,
+        isWorking: showWorkingIndicator,
         activeTurnStartedAt,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
@@ -317,7 +319,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       runningTurnId,
       expandedTurnIds,
       expandedWorkGroupIds,
-      isWorking,
+      showWorkingIndicator,
       activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
@@ -467,7 +469,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [],
   );
 
-  if (rows.length === 0 && !isWorking) {
+  if (rows.length === 0 && !showWorkingIndicator) {
     if (hideEmptyPlaceholder) {
       return null;
     }
@@ -861,7 +863,7 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <AssistantTimelineRow row={row} />
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
-      {row.kind === "working" ? <WorkingTimelineRow row={row} /> : null}
+      {row.kind === "working" ? <WorkingTimelineRow /> : null}
     </div>
   );
 });
@@ -1091,23 +1093,25 @@ function ProposedPlanTimelineRow({
   );
 }
 
-function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "working" }> }) {
+function WorkingTimelineRow() {
+  const { resolvedTheme } = use(TimelineRowCtx);
+
   return (
-    <div className="py-0.5 pl-1.5">
-      <div className="flex items-center gap-2 pt-1 text-[11px] text-muted-foreground/70 tabular-nums">
-        <span className="inline-flex items-center gap-[3px]">
-          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse" />
-          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse [animation-delay:200ms]" />
-          <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-status-pulse [animation-delay:400ms]" />
-        </span>
-        <span>
-          {row.createdAt ? (
-            <>
-              Working for <WorkingTimer createdAt={row.createdAt} />
-            </>
-          ) : (
-            "Working..."
-          )}
+    <div className="py-2 pl-1.5">
+      <div
+        className="inline-flex h-12 max-w-full items-center gap-2 py-0 pl-1.5 pr-4 text-sm leading-5 text-foreground/80"
+        role="status"
+        aria-label="Thinking"
+      >
+        <ThinkingOrb
+          aria-hidden="true"
+          state="composing"
+          size={64}
+          theme={resolvedTheme}
+          style={{ width: 36, height: 36, flex: "none" }}
+        />
+        <span aria-hidden="true" className="thinking-orb-shimmer" data-text="Thinking…">
+          Thinking…
         </span>
       </div>
     </div>
@@ -1118,29 +1122,6 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
 // Self-ticking labels — update their own text nodes so elapsed-time display
 // does not create a React commit every second while a response is streaming.
 // ---------------------------------------------------------------------------
-
-/** Live "Working for Xs" label. */
-function WorkingTimer({ createdAt }: { createdAt: string }) {
-  const textRef = useRef<HTMLSpanElement>(null);
-  const initialText = formatWorkingTimerNow(createdAt);
-
-  useEffect(() => {
-    const updateText = () => {
-      if (textRef.current) {
-        textRef.current.textContent = formatWorkingTimerNow(createdAt);
-      }
-    };
-    updateText();
-    const id = setInterval(updateText, 1000);
-    return () => clearInterval(id);
-  }, [createdAt]);
-
-  return (
-    <span ref={textRef} className="tabular-nums">
-      {initialText}
-    </span>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Extracted row sections — own their state / store subscriptions so changes
@@ -1721,33 +1702,6 @@ function useStableRows(rows: MessagesTimelineRow[]): MessagesTimelineRow[] {
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
-
-function formatWorkingTimer(startIso: string, endIso: string): string | null {
-  const startedAtMs = Date.parse(startIso);
-  const endedAtMs = Date.parse(endIso);
-  if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs)) {
-    return null;
-  }
-
-  const elapsedSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
-  if (elapsedSeconds < 60) {
-    return `${elapsedSeconds}s`;
-  }
-
-  const hours = Math.floor(elapsedSeconds / 3600);
-  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
-  const seconds = elapsedSeconds % 60;
-
-  if (hours > 0) {
-    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
-  }
-
-  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
-}
-
-function formatWorkingTimerNow(startIso: string): string {
-  return formatWorkingTimer(startIso, new Date().toISOString()) ?? "0s";
-}
 
 type WorkEntryIconName =
   | "bot"

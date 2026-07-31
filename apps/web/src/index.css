@@ -224,6 +224,46 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 }
 
+.thinking-orb-shimmer {
+  position: relative;
+  display: inline-block;
+  color: color-mix(in oklab, var(--foreground) 52%, transparent);
+}
+
+.thinking-orb-shimmer::before {
+  position: absolute;
+  inset: 0;
+  color: transparent;
+  pointer-events: none;
+  content: attr(data-text);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent 40%,
+    var(--foreground) 50%,
+    transparent 60%,
+    transparent 100%
+  );
+  background-repeat: no-repeat;
+  background-position: 100% 0;
+  background-size: 400% 100%;
+  background-clip: text;
+  animation: thinking-orb-shimmer 2s linear infinite;
+  -webkit-text-fill-color: transparent;
+}
+
+@keyframes thinking-orb-shimmer {
+  to {
+    background-position: 0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thinking-orb-shimmer::before {
+    animation: none;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

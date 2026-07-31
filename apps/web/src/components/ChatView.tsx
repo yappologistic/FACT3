@@ -2119,6 +2119,7 @@ function ChatViewContent(props: ChatViewProps) {
     threadError,
   });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const activeTurnInProgress = !threadError && (isWorking || !latestTurnSettled);
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -2373,7 +2374,10 @@ function ChatViewContent(props: ChatViewProps) {
   const draftHeroDockRequested =
     activeThreadKey !== null && dockedDraftHeroThreadKey === activeThreadKey;
   const isDraftHeroState =
-    isLocalDraftThread && timelineEntries.length === 0 && !isWorking && !draftHeroDockRequested;
+    isLocalDraftThread &&
+    timelineEntries.length === 0 &&
+    !activeTurnInProgress &&
+    !draftHeroDockRequested;
   const [
     attachDraftHeroTransitionGroupRef,
     attachDraftHeroComposerAnchorRef,
@@ -5785,7 +5789,7 @@ function ChatViewContent(props: ChatViewProps) {
               <MessagesTimeline
                 key={activeThread.id}
                 isWorking={isWorking}
-                activeTurnInProgress={isWorking || !latestTurnSettled}
+                activeTurnInProgress={activeTurnInProgress}
                 activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
                 timelineEntries={timelineEntries}
