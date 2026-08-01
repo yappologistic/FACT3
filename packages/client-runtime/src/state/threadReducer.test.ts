@@ -328,6 +328,66 @@ describe("applyThreadDetailEvent", () => {
       }
     });
 
+    it("binds a checkpoint once and keeps its reference stable across later chunks", () => {
+      const checkpoint = {
+        turnId: TurnId.make("turn-1"),
+        checkpointTurnCount: 1,
+        checkpointRef: CheckpointRef.make("ref-1"),
+        status: "ready" as const,
+        files: [],
+        assistantMessageId: null,
+        completedAt: "2026-04-01T06:00:00.000Z",
+      };
+      const threadWithBoundCheckpoint: OrchestrationThread = {
+        ...baseThread,
+        messages: [
+          {
+            id: MessageId.make("msg-2"),
+            role: "assistant",
+            text: "Hello",
+            turnId: TurnId.make("turn-1"),
+            streaming: true,
+            createdAt: "2026-04-01T06:00:00.000Z",
+            updatedAt: "2026-04-01T06:00:00.000Z",
+          },
+        ],
+        checkpoints: [checkpoint],
+      };
+
+      const event = {
+        ...baseEventFields,
+        sequence: 7,
+        occurredAt: "2026-04-01T06:01:00.000Z",
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-1"),
+        type: "thread.message-sent",
+        payload: {
+          threadId: ThreadId.make("thread-1"),
+          messageId: MessageId.make("msg-2"),
+          role: "assistant",
+          text: ", world!",
+          turnId: TurnId.make("turn-1"),
+          streaming: true,
+          createdAt: "2026-04-01T06:00:00.000Z",
+          updatedAt: "2026-04-01T06:01:00.000Z",
+        },
+      } as const;
+
+      const firstResult = applyThreadDetailEvent(threadWithBoundCheckpoint, event);
+      expect(firstResult.kind).toBe("updated");
+      if (firstResult.kind === "updated") {
+        expect(firstResult.thread.checkpoints).not.toBe(threadWithBoundCheckpoint.checkpoints);
+        expect(firstResult.thread.checkpoints[0]?.assistantMessageId).toBe("msg-2");
+
+        const secondResult = applyThreadDetailEvent(firstResult.thread, event);
+        expect(secondResult.kind).toBe("updated");
+        if (secondResult.kind === "updated") {
+          expect(secondResult.thread.checkpoints).toBe(firstResult.thread.checkpoints);
+          expect(secondResult.thread.checkpoints[0]).toBe(firstResult.thread.checkpoints[0]);
+        }
+      }
+    });
+
     it("updates latestTurn for assistant messages with a turn", () => {
       const result = applyThreadDetailEvent(baseThread, {
         ...baseEventFields,

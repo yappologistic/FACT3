@@ -243,27 +243,7 @@ export function applyThreadDetailEvent(
         updatedAt: event.payload.updatedAt,
       };
 
-      const existingMessage = thread.messages.find((entry) => entry.id === message.id);
-      const messages = existingMessage
-        ? Arr.map(thread.messages, (entry) =>
-            entry.id !== message.id
-              ? entry
-              : {
-                  ...entry,
-                  text: message.streaming
-                    ? `${entry.text}${message.text}`
-                    : message.text.length > 0
-                      ? message.text
-                      : entry.text,
-                  streaming: message.streaming,
-                  ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
-                  ...(message.streaming ? {} : { updatedAt: message.updatedAt }),
-                  ...(message.attachments !== undefined
-                    ? { attachments: message.attachments }
-                    : {}),
-                },
-          )
-        : Arr.append(thread.messages, message);
+      const messages = appendOrUpdateMessage(thread.messages, message);
       // Update latestTurn for assistant messages bound to a turn. A completed
       // assistant message only settles the turn once the session is no longer
       // running it — providers may emit several assistant messages per turn
@@ -575,10 +555,50 @@ function rebindCheckpointAssistantMessage(
   checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>,
   turnId: TurnId,
   messageId: MessageId,
-): OrchestrationCheckpointSummary[] {
-  return Arr.map(checkpoints, (entry) =>
-    entry.turnId === turnId ? { ...entry, assistantMessageId: messageId } : entry,
-  );
+): ReadonlyArray<OrchestrationCheckpointSummary> {
+  let updated: OrchestrationCheckpointSummary[] | undefined;
+  for (let index = 0; index < checkpoints.length; index += 1) {
+    const entry = checkpoints[index];
+    if (entry?.turnId === turnId && entry.assistantMessageId !== messageId) {
+      updated ??= Array.from(checkpoints);
+      updated[index] = { ...entry, assistantMessageId: messageId };
+    }
+  }
+  return updated ?? checkpoints;
+}
+
+function appendOrUpdateMessage(
+  messages: ReadonlyArray<OrchestrationMessage>,
+  message: OrchestrationMessage,
+): OrchestrationMessage[] {
+  // Streaming updates almost always target the newest message, so search from
+  // the tail and copy once instead of scanning the history and then mapping it.
+  let existingIndex = messages.length - 1;
+  while (existingIndex >= 0 && messages[existingIndex]?.id !== message.id) {
+    existingIndex -= 1;
+  }
+  if (existingIndex < 0) {
+    return Arr.append(messages, message);
+  }
+
+  const entry = messages[existingIndex];
+  if (entry === undefined) {
+    return Arr.append(messages, message);
+  }
+  const updated = Array.from(messages);
+  updated[existingIndex] = {
+    ...entry,
+    text: message.streaming
+      ? `${entry.text}${message.text}`
+      : message.text.length > 0
+        ? message.text
+        : entry.text,
+    streaming: message.streaming,
+    ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
+    ...(message.streaming ? {} : { updatedAt: message.updatedAt }),
+    ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+  };
+  return updated;
 }
 
 function retainMessagesAfterRevert(

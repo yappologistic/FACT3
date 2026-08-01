@@ -16,7 +16,6 @@ import {
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
-  hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   openCodexThread,
 } from "./CodexSessionRuntime.ts";
@@ -304,17 +303,6 @@ describe("T3 browser developer instructions", () => {
       NodeAssert.match(instructions, /preview_open/);
       NodeAssert.match(instructions, /Do not switch to global browser skills/);
     }
-  });
-});
-
-describe("hasConfiguredMcpServer", () => {
-  it("detects inline Codex MCP configuration arguments", () => {
-    NodeAssert.equal(hasConfiguredMcpServer(undefined), false);
-    NodeAssert.equal(hasConfiguredMcpServer(["--model", "gpt-5.4"]), false);
-    NodeAssert.equal(
-      hasConfiguredMcpServer(["-c", 'mcp_servers.t3-code.url="http://127.0.0.1/mcp"']),
-      true,
-    );
   });
 });
 

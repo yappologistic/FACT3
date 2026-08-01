@@ -1417,6 +1417,9 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
                   ...(options?.environment ?? process.env),
                   T3_MCP_BEARER_TOKEN: mcpSession.authorizationHeader.replace(/^Bearer\s+/, ""),
                 },
+                // Codex loads inline MCP configuration while the app server starts.
+                // Reloading it before a turn would also restart every user-configured
+                // MCP server, even though this session-scoped configuration is unchanged.
                 appServerArgs: [
                   "-c",
                   `mcp_servers.t3-code.url=${mcpSession.endpoint}`,
