@@ -257,6 +257,53 @@ describe("MessagesTimeline", () => {
     expect(markup).toContain("Thinking…");
   });
 
+  it("uses Interior Text Reveal only while an assistant response is streaming", () => {
+    const assistantMessageId = MessageId.make("message-streaming-reveal");
+    const turnId = TurnId.make("turn-streaming-reveal");
+    const message = {
+      id: assistantMessageId,
+      role: "assistant" as const,
+      text: "A **revealed response** arrives here.",
+      turnId,
+      createdAt: MESSAGE_CREATED_AT,
+      updatedAt: MESSAGE_CREATED_AT,
+      streaming: true,
+    };
+
+    const streamingMarkup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-streaming-reveal",
+            kind: "message",
+            createdAt: MESSAGE_CREATED_AT,
+            message,
+          },
+        ]}
+      />,
+    );
+    const completedMarkup = renderToStaticMarkup(
+      <MessagesTimeline
+        {...buildProps()}
+        timelineEntries={[
+          {
+            id: "entry-completed-reveal",
+            kind: "message",
+            createdAt: MESSAGE_CREATED_AT,
+            message: { ...message, streaming: false },
+          },
+        ]}
+      />,
+    );
+
+    expect(streamingMarkup).toContain('data-interior-text-reveal="streaming"');
+    expect(streamingMarkup).toContain("blur(8px)");
+    expect(streamingMarkup).toContain("<strong>");
+    expect(completedMarkup).not.toContain("data-interior-text-reveal");
+    expect(completedMarkup).toContain("<strong>");
+  });
+
   it("uses the larger leading inset only when the top fade is enabled", () => {
     const timelineEntries = [buildUserTimelineEntry("Hello")];
 

@@ -125,7 +125,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
      compositor updates discrete frames instead of every vsync. */
   --animate-status-pulse: status-pulse 2s infinite;
   --animate-status-ping: status-ping 2s infinite;
-  --animate-sidebar-working-text: sidebar-working-text 3.4s infinite;
   --font-sans: "Geist", "Inter", system-ui, sans-serif;
   --font-mono:
     "Geist Mono", ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
@@ -205,21 +204,6 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       scale: 2;
     }
   }
-  @keyframes sidebar-working-text {
-    0%,
-    36% {
-      opacity: 1;
-      animation-timing-function: steps(10);
-    }
-    50%,
-    86% {
-      opacity: 0.75;
-      animation-timing-function: steps(10);
-    }
-    100% {
-      opacity: 1;
-    }
-  }
 }
 
 .thinking-orb-shimmer {
@@ -231,28 +215,22 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 .thinking-orb-shimmer::before {
   position: absolute;
   inset: 0;
-  color: transparent;
+  color: var(--foreground);
   pointer-events: none;
   content: attr(data-text);
-  background-image: linear-gradient(
-    90deg,
-    transparent 0%,
-    transparent 40%,
-    var(--foreground) 50%,
-    transparent 60%,
-    transparent 100%
-  );
-  background-repeat: no-repeat;
-  background-position: 100% 0;
-  background-size: 400% 100%;
-  background-clip: text;
-  animation: thinking-orb-shimmer 2s linear infinite;
-  -webkit-text-fill-color: transparent;
+  clip-path: polygon(-25% 0, -8% 0, 2% 100%, -15% 100%);
+  animation: thinking-orb-highlight-sweep 2s linear infinite;
+  will-change: clip-path;
 }
 
-@keyframes thinking-orb-shimmer {
-  to {
-    background-position: 0 0;
+@keyframes thinking-orb-highlight-sweep {
+  0%,
+  15% {
+    clip-path: polygon(-25% 0, -8% 0, 2% 100%, -15% 100%);
+  }
+  75%,
+  100% {
+    clip-path: polygon(108% 0, 125% 0, 135% 100%, 118% 100%);
   }
 }
 

@@ -1,4 +1,4 @@
-import { Children, cloneElement, isValidElement, type ReactNode } from "react";
+import { Children, cloneElement, Fragment, isValidElement, type ReactNode } from "react";
 import type { ServerProviderSkill } from "@t3tools/contracts";
 
 import { formatProviderSkillDisplayName } from "../../providerSkillPresentation";
@@ -13,10 +13,16 @@ import { cn } from "~/lib/utils";
 const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s|$)/g;
 
 type InlineSkill = Pick<ServerProviderSkill, "name" | "displayName">;
+type InlineTextRenderer = (text: string) => ReactNode;
 
-export function SkillInlineText(props: { text: string; skills: ReadonlyArray<InlineSkill> }) {
+export function SkillInlineText(props: {
+  text: string;
+  skills: ReadonlyArray<InlineSkill>;
+  renderText?: InlineTextRenderer | undefined;
+}) {
   const nodes: ReactNode[] = [];
   let cursor = 0;
+  const renderText = props.renderText ?? ((text: string) => text);
 
   for (const match of props.text.matchAll(SKILL_TOKEN_REGEX)) {
     const prefix = match[1] ?? "";
@@ -29,28 +35,53 @@ export function SkillInlineText(props: { text: string; skills: ReadonlyArray<Inl
     }
 
     if (start > cursor) {
-      nodes.push(props.text.slice(cursor, start));
+      const text = props.text.slice(cursor, start);
+      nodes.push(<Fragment key={`text:${cursor}`}>{renderText(text)}</Fragment>);
     }
     nodes.push(<SkillChip key={`${start}:${name}`} skill={skill} rawText={rawText} />);
     cursor = start + rawText.length;
   }
 
   if (cursor === 0) {
-    return <>{props.text}</>;
+    return <>{renderText(props.text)}</>;
   }
   if (cursor < props.text.length) {
-    nodes.push(props.text.slice(cursor));
+    nodes.push(<Fragment key={`text:${cursor}`}>{renderText(props.text.slice(cursor))}</Fragment>);
   }
   return <>{nodes}</>;
+}
+
+function renderPlainMarkdownTextChildren(
+  children: ReactNode,
+  renderText: InlineTextRenderer,
+): ReactNode {
+  return Children.map(children, (child) => {
+    if (typeof child === "string") {
+      return renderText(child);
+    }
+    if (!isValidElement<{ children?: ReactNode; node?: { tagName?: string } }>(child)) {
+      return child;
+    }
+    const markdownTagName = typeof child.type === "string" ? child.type : child.props.node?.tagName;
+    if (markdownTagName === "code" || !("children" in child.props)) {
+      return child;
+    }
+    return cloneElement(
+      child,
+      undefined,
+      renderPlainMarkdownTextChildren(child.props.children, renderText),
+    );
+  });
 }
 
 export function renderSkillInlineMarkdownChildren(
   children: ReactNode,
   skills: ReadonlyArray<InlineSkill>,
+  renderText?: InlineTextRenderer,
 ): ReactNode {
   return Children.map(children, (child) => {
     if (typeof child === "string") {
-      return <SkillInlineText text={child} skills={skills} />;
+      return <SkillInlineText text={child} skills={skills} renderText={renderText} />;
     }
     if (!isValidElement<{ children?: ReactNode; node?: { tagName?: string } }>(child)) {
       return child;
@@ -58,8 +89,17 @@ export function renderSkillInlineMarkdownChildren(
     // Custom react-markdown components replace the intrinsic type, so also
     // check the hast node they carry.
     const markdownTagName = typeof child.type === "string" ? child.type : child.props.node?.tagName;
-    if (markdownTagName === "code" || markdownTagName === "a") {
+    if (markdownTagName === "code") {
       return child;
+    }
+    if (markdownTagName === "a") {
+      return renderText && "children" in child.props
+        ? cloneElement(
+            child,
+            undefined,
+            renderPlainMarkdownTextChildren(child.props.children, renderText),
+          )
+        : child;
     }
     if (!("children" in child.props)) {
       return child;
@@ -67,7 +107,7 @@ export function renderSkillInlineMarkdownChildren(
     return cloneElement(
       child,
       undefined,
-      renderSkillInlineMarkdownChildren(child.props.children, skills),
+      renderSkillInlineMarkdownChildren(child.props.children, skills, renderText),
     );
   });
 }

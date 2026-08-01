@@ -41,6 +41,7 @@
     "lexical": "^0.41.0",
     "lucide-react": "^0.564.0",
     "metal-fx": "1.0.4",
+    "motion": "12.42.2",
     "react": "19.2.6",
     "react-dom": "19.2.6",
     "react-markdown": "^10.1.0",
