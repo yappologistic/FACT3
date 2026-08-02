@@ -26,6 +26,7 @@ import {
   type EnvironmentConnectionPresentation,
 } from "@t3tools/client-runtime/connection";
 import { effectiveSettled, effectiveSnoozed } from "@t3tools/client-runtime/state/thread-settled";
+import { deriveActiveSubagentCount } from "@t3tools/client-runtime/activity";
 import {
   parseScopedThreadKey,
   scopedThreadKey,
@@ -78,7 +79,6 @@ import {
   derivePendingUserInputs,
   derivePhase,
   deriveTimelineEntries,
-  deriveActiveWorkStartedAt,
   deriveActivePlanState,
   findSidebarProposedPlan,
   findLatestProposedPlan,
@@ -222,6 +222,7 @@ import {
 } from "../state/entities";
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
+import { ComposerActivityStatus } from "./chat/ComposerActivityStatus";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -2033,6 +2034,14 @@ function ChatViewContent(props: ChatViewProps) {
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
   const phase = derivePhase(activeThread?.session ?? null);
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const activeSubagentCount = useMemo(
+    () =>
+      deriveActiveSubagentCount(
+        threadActivities,
+        activeThread?.session?.activeTurnId ?? activeLatestTurn?.turnId ?? null,
+      ),
+    [activeLatestTurn?.turnId, activeThread?.session?.activeTurnId, threadActivities],
+  );
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(threadActivities),
@@ -2105,27 +2114,17 @@ function ChatViewContent(props: ChatViewProps) {
     latestTurnSettled &&
     hasActionableProposedPlan(activeProposedPlan);
   const activePendingApproval = pendingApprovals[0] ?? null;
-  const {
-    beginLocalDispatch,
-    resetLocalDispatch,
-    localDispatchStartedAt,
-    isPreparingWorktree,
-    isSendBusy,
-  } = useLocalDispatchState({
-    activeThread,
-    activeLatestTurn,
-    phase,
-    activePendingApproval: activePendingApproval?.requestId ?? null,
-    activePendingUserInput: activePendingUserInput?.requestId ?? null,
-    threadError,
-  });
+  const { beginLocalDispatch, resetLocalDispatch, isPreparingWorktree, isSendBusy } =
+    useLocalDispatchState({
+      activeThread,
+      activeLatestTurn,
+      phase,
+      activePendingApproval: activePendingApproval?.requestId ?? null,
+      activePendingUserInput: activePendingUserInput?.requestId ?? null,
+      threadError,
+    });
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
   const activeTurnInProgress = !threadError && (isWorking || !latestTurnSettled);
-  const activeWorkStartedAt = deriveActiveWorkStartedAt(
-    activeLatestTurn,
-    activeThread?.session ?? null,
-    localDispatchStartedAt,
-  );
   useEffect(() => {
     attachmentPreviewHandoffByMessageIdRef.current = attachmentPreviewHandoffByMessageId;
   }, [attachmentPreviewHandoffByMessageId]);
@@ -5785,7 +5784,6 @@ function ChatViewContent(props: ChatViewProps) {
                 key={activeThread.id}
                 isWorking={isWorking}
                 activeTurnInProgress={activeTurnInProgress}
-                activeTurnStartedAt={activeWorkStartedAt}
                 listRef={legendListRef}
                 timelineEntries={timelineEntries}
                 latestTurn={activeLatestTurn}
@@ -5876,6 +5874,14 @@ function ChatViewContent(props: ChatViewProps) {
                   )}
                   {threadSyncPhase && !activeEnvironmentUnavailable ? (
                     <ThreadSyncStatusPill phase={threadSyncPhase} />
+                  ) : null}
+                  {!isDraftHeroState && activeTurnInProgress ? (
+                    <div className="mx-auto w-full max-w-3xl">
+                      <ComposerActivityStatus
+                        activeSubagentCount={activeSubagentCount}
+                        theme={resolvedTheme}
+                      />
+                    </div>
                   ) : null}
                   <div
                     className="relative"

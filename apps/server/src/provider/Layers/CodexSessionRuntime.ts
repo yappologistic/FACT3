@@ -18,6 +18,7 @@ import {
 } from "@t3tools/contracts";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { normalizeModelSlug } from "@t3tools/shared/model";
+import * as Clock from "effect/Clock";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -596,8 +597,14 @@ function readRouteFields(notification: CodexServerNotification): {
   }
 }
 
+interface CollabReceiverRoute {
+  readonly parentTurnId: TurnId;
+  readonly itemId: ProviderItemId;
+  readonly agentPath?: string;
+}
+
 function rememberCollabReceiverTurns(
-  collabReceiverTurns: Map<string, TurnId>,
+  collabReceiverTurns: Map<string, CollabReceiverRoute>,
   notification: CodexServerNotification,
   parentTurnId: TurnId | undefined,
 ): void {
@@ -609,12 +616,25 @@ function rememberCollabReceiverTurns(
     return;
   }
 
-  if (notification.params.item.type !== "collabAgentToolCall") {
+  const item = notification.params.item;
+  if (item.type === "subAgentActivity") {
+    collabReceiverTurns.set(item.agentThreadId, {
+      parentTurnId,
+      itemId: ProviderItemId.make(item.id),
+      agentPath: item.agentPath,
+    });
     return;
   }
 
-  for (const receiverThreadId of notification.params.item.receiverThreadIds) {
-    collabReceiverTurns.set(receiverThreadId, parentTurnId);
+  if (item.type !== "collabAgentToolCall") {
+    return;
+  }
+
+  for (const receiverThreadId of item.receiverThreadIds) {
+    collabReceiverTurns.set(receiverThreadId, {
+      parentTurnId,
+      itemId: ProviderItemId.make(item.id),
+    });
   }
 }
 
@@ -718,7 +738,7 @@ export const makeCodexSessionRuntime = (
     const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
     const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
     const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
-    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
+    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, CollabReceiverRoute>());
     const closedRef = yield* Ref.make(false);
 
     // `~` is not shell-expanded when env vars are set via
@@ -840,14 +860,40 @@ export const makeCodexSessionRuntime = (
         const payload = notification.params;
         const route = readRouteFields(notification);
         const collabReceiverTurns = yield* Ref.get(collabReceiverTurnsRef);
-        const childParentTurnId = (() => {
+        const childRoute = (() => {
           const providerConversationId = readNotificationThreadId(notification);
           return providerConversationId
             ? collabReceiverTurns.get(providerConversationId)
             : undefined;
         })();
+        const childParentTurnId = childRoute?.parentTurnId;
 
         rememberCollabReceiverTurns(collabReceiverTurns, notification, route.turnId);
+        if (childRoute && notification.method === "turn/completed") {
+          const agentThreadId = notification.params.threadId;
+          collabReceiverTurns.delete(agentThreadId);
+          yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
+          yield* emitEvent({
+            kind: "notification",
+            threadId: options.threadId,
+            method: "item/completed",
+            turnId: childRoute.parentTurnId,
+            itemId: childRoute.itemId,
+            payload: {
+              completedAtMs: yield* Clock.currentTimeMillis,
+              threadId: agentThreadId,
+              turnId: childRoute.parentTurnId,
+              item: {
+                id: childRoute.itemId,
+                type: "subAgentActivity",
+                kind: "interrupted",
+                agentThreadId,
+                agentPath: childRoute.agentPath ?? agentThreadId,
+              },
+            },
+          });
+          return;
+        }
         if (childParentTurnId && shouldSuppressChildConversationNotification(notification.method)) {
           yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
           return;

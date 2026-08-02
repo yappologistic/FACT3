@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./activity": {
+      "types": "./src/activity/index.ts",
+      "default": "./src/activity/index.ts"
+    },
     "./connection": {
       "types": "./src/connection/index.ts",
       "default": "./src/connection/index.ts"

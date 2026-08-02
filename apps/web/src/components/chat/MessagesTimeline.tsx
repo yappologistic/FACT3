@@ -24,7 +24,6 @@ import {
 import { flushSync } from "react-dom";
 import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import { FileDiff } from "@pierre/diffs/react";
-import { ThinkingOrb } from "thinking-orbs";
 import {
   deriveTimelineEntries,
   workEntryIndicatesToolFailure,
@@ -160,7 +159,6 @@ const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "d
 interface MessagesTimelineProps {
   isWorking: boolean;
   activeTurnInProgress: boolean;
-  activeTurnStartedAt: string | null;
   listRef: React.RefObject<LegendListRef | null>;
   timelineEntries: ReturnType<typeof deriveTimelineEntries>;
   latestTurn: TimelineLatestTurn | null;
@@ -195,7 +193,6 @@ interface MessagesTimelineProps {
 export const MessagesTimeline = memo(function MessagesTimeline({
   isWorking,
   activeTurnInProgress,
-  activeTurnStartedAt,
   listRef,
   timelineEntries,
   latestTurn,
@@ -222,7 +219,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   hideEmptyPlaceholder = false,
   topFadeEnabled = false,
 }: MessagesTimelineProps) {
-  const showWorkingIndicator = activeTurnInProgress;
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
@@ -309,8 +305,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         runningTurnId,
         expandedTurnIds,
         expandedWorkGroupIds,
-        isWorking: showWorkingIndicator,
-        activeTurnStartedAt,
+        isWorking: false,
+        activeTurnStartedAt: null,
         turnDiffSummaryByAssistantMessageId,
         revertTurnCountByUserMessageId,
       }),
@@ -320,8 +316,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       runningTurnId,
       expandedTurnIds,
       expandedWorkGroupIds,
-      showWorkingIndicator,
-      activeTurnStartedAt,
       turnDiffSummaryByAssistantMessageId,
       revertTurnCountByUserMessageId,
     ],
@@ -470,8 +464,8 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     [],
   );
 
-  if (rows.length === 0 && !showWorkingIndicator) {
-    if (hideEmptyPlaceholder) {
+  if (rows.length === 0) {
+    if (hideEmptyPlaceholder || activeTurnInProgress) {
       return null;
     }
     return (
@@ -864,7 +858,6 @@ const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: Time
         <AssistantTimelineRow row={row} />
       ) : null}
       {row.kind === "proposed-plan" ? <ProposedPlanTimelineRow row={row} /> : null}
-      {row.kind === "working" ? <WorkingTimelineRow /> : null}
     </div>
   );
 });
@@ -1090,31 +1083,6 @@ function ProposedPlanTimelineRow({
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
       />
-    </div>
-  );
-}
-
-function WorkingTimelineRow() {
-  const { resolvedTheme } = use(TimelineRowCtx);
-
-  return (
-    <div className="py-2 pl-1.5">
-      <div
-        className="inline-flex h-12 max-w-full items-center gap-2 py-0 pl-1.5 pr-4 text-sm leading-5 text-foreground/80"
-        role="status"
-        aria-label="Thinking"
-      >
-        <ThinkingOrb
-          aria-hidden="true"
-          state="composing"
-          size={64}
-          theme={resolvedTheme}
-          style={{ width: 36, height: 36, flex: "none" }}
-        />
-        <span aria-hidden="true" className="thinking-orb-shimmer" data-text="Thinking…">
-          Thinking…
-        </span>
-      </div>
     </div>
   );
 }

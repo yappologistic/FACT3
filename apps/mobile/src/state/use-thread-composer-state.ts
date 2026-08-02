@@ -11,6 +11,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+import { deriveActiveSubagentCount } from "@t3tools/client-runtime/activity";
 import { deriveActiveWorkStartedAt } from "@t3tools/shared/orchestrationTiming";
 
 import { makeQueuedMessageMetadata } from "../lib/commandMetadata";
@@ -128,6 +129,18 @@ export function useThreadComposerState() {
       null,
     );
   }, [selectedThreadDetail, selectedThreadSessionActivity, selectedThreadShell]);
+
+  const activeSubagentCount = useMemo(
+    () =>
+      deriveActiveSubagentCount(
+        selectedThreadDetail?.activities ?? [],
+        selectedThreadDetail?.session?.activeTurnId ??
+          selectedThreadShell?.session?.activeTurnId ??
+          selectedThreadDetail?.latestTurn?.turnId ??
+          null,
+      ),
+    [selectedThreadDetail, selectedThreadShell?.session?.activeTurnId],
+  );
 
   const activeThreadBusy =
     !!selectedThread &&
@@ -303,6 +316,7 @@ export function useThreadComposerState() {
     selectedThreadFeed,
     selectedThreadQueueCount,
     activeWorkStartedAt,
+    activeSubagentCount,
     draftMessage,
     draftAttachments,
     modelSelection,

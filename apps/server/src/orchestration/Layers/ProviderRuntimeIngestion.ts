@@ -204,6 +204,71 @@ function truncateDetail(value: string, limit = 180): string {
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
 }
 
+function asUnknownRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function buildCollabAgentActivitySnapshot(
+  itemType: string,
+  data: unknown,
+):
+  | {
+      readonly tool?: string;
+      readonly receiverThreadIds?: ReadonlyArray<string>;
+      readonly agentsStates?: Readonly<Record<string, { readonly status: string }>>;
+    }
+  | undefined {
+  if (itemType !== "collab_agent_tool_call") {
+    return undefined;
+  }
+  const dataRecord = asUnknownRecord(data);
+  const item = asUnknownRecord(dataRecord?.item) ?? dataRecord;
+  if (!item) {
+    return undefined;
+  }
+
+  if (item.type === "subAgentActivity") {
+    const agentThreadId = typeof item.agentThreadId === "string" ? item.agentThreadId : undefined;
+    const kind = typeof item.kind === "string" ? item.kind : undefined;
+    if (!agentThreadId || !kind) {
+      return undefined;
+    }
+    return {
+      tool: "spawnAgent",
+      receiverThreadIds: [agentThreadId],
+      agentsStates: {
+        [agentThreadId]: { status: kind === "interrupted" ? "interrupted" : "running" },
+      },
+    };
+  }
+
+  const tool = typeof item.tool === "string" ? item.tool : undefined;
+  const receiverThreadIds = Array.isArray(item.receiverThreadIds)
+    ? item.receiverThreadIds.filter((value): value is string => typeof value === "string")
+    : undefined;
+  const rawAgentStates = asUnknownRecord(item.agentsStates);
+  const agentsStates: Record<string, { readonly status: string }> = {};
+  if (rawAgentStates) {
+    for (const [agentId, rawState] of Object.entries(rawAgentStates)) {
+      const status = asUnknownRecord(rawState)?.status;
+      if (typeof status === "string") {
+        agentsStates[agentId] = { status };
+      }
+    }
+  }
+
+  if (!tool && receiverThreadIds === undefined && Object.keys(agentsStates).length === 0) {
+    return undefined;
+  }
+  return {
+    ...(tool ? { tool } : {}),
+    ...(receiverThreadIds !== undefined ? { receiverThreadIds } : {}),
+    ...(Object.keys(agentsStates).length > 0 ? { agentsStates } : {}),
+  };
+}
+
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined {
   const trimmed = planMarkdown?.trim();
   if (!trimmed) {
@@ -617,6 +682,7 @@ export function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
+      const collab = buildCollabAgentActivitySnapshot(event.payload.itemType, event.payload.data);
       return [
         {
           id: event.eventId,
@@ -626,9 +692,11 @@ export function runtimeEventToActivities(
           summary: event.payload.title ?? "Tool updated",
           payload: {
             itemType: event.payload.itemType,
+            ...(event.itemId ? { toolCallId: event.itemId } : {}),
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(collab ? { collab } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -640,6 +708,7 @@ export function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
+      const collab = buildCollabAgentActivitySnapshot(event.payload.itemType, event.payload.data);
       return [
         {
           id: event.eventId,
@@ -649,8 +718,10 @@ export function runtimeEventToActivities(
           summary: event.payload.title ?? "Tool",
           payload: {
             itemType: event.payload.itemType,
+            ...(event.itemId ? { toolCallId: event.itemId } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
             ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(collab ? { collab } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -662,6 +733,7 @@ export function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
+      const collab = buildCollabAgentActivitySnapshot(event.payload.itemType, event.payload.data);
       return [
         {
           id: event.eventId,
@@ -671,7 +743,9 @@ export function runtimeEventToActivities(
           summary: `${event.payload.title ?? "Tool"} started`,
           payload: {
             itemType: event.payload.itemType,
+            ...(event.itemId ? { toolCallId: event.itemId } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
+            ...(collab ? { collab } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,

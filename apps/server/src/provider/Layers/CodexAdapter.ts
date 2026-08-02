@@ -226,7 +226,7 @@ function toCanonicalItemType(raw: string | undefined | null): CanonicalItemType 
     return "file_change";
   if (type.includes("mcp")) return "mcp_tool_call";
   if (type.includes("dynamic tool")) return "dynamic_tool_call";
-  if (type.includes("collab")) return "collab_agent_tool_call";
+  if (type.includes("collab") || type.includes("sub agent")) return "collab_agent_tool_call";
   if (type.includes("web search")) return "web_search";
   if (type.includes("image")) return "image_view";
   if (type.includes("review entered")) return "review_entered";
@@ -860,6 +860,14 @@ function mapToRuntimeEvents(
           },
         },
       ];
+    }
+    // Codex emits an immediate item/completed for a subAgentActivity whose
+    // kind is still "started". The child is alive at that point, so retain it
+    // as an update; CodexSessionRuntime emits the terminal activity when the
+    // child turn actually completes.
+    if (item.type === "subAgentActivity" && item.kind === "started") {
+      const updated = mapItemLifecycle(event, canonicalThreadId, "item.updated");
+      return updated ? [updated] : [];
     }
     const completed = mapItemLifecycle(event, canonicalThreadId, "item.completed");
     return completed ? [completed] : [];

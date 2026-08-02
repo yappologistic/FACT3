@@ -465,13 +465,14 @@ describe("buildThreadFeed", () => {
 
   it("appends active work as a normal timeline row", () => {
     const startedAt = "2026-04-01T00:00:01.000Z";
-    const presented = deriveThreadFeedPresentation([], null, new Set(), new Set(), startedAt);
+    const presented = deriveThreadFeedPresentation([], null, new Set(), new Set(), startedAt, 4);
 
     expect(presented).toEqual([
       {
         type: "working",
         id: "working-indicator-row",
         createdAt: startedAt,
+        activeSubagentCount: 4,
       },
     ]);
     expect(deriveThreadFeedPresentation(presented, null, new Set())).toEqual([]);

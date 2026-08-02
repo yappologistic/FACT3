@@ -103,6 +103,7 @@ export type ThreadFeedEntry =
       readonly type: "working";
       readonly id: string;
       readonly createdAt: string;
+      readonly activeSubagentCount: number;
     }
   | {
       readonly type: "activity-group";
@@ -1137,6 +1138,7 @@ export function deriveThreadFeedPresentation(
   expandedTurnIds: ReadonlySet<TurnId>,
   expandedWorkGroupIds: ReadonlySet<string> = new Set(),
   activeWorkStartedAt: string | null = null,
+  activeSubagentCount = 0,
 ): ThreadFeedEntry[] {
   const sourceFeed = feed.filter(
     (entry) =>
@@ -1174,6 +1176,7 @@ export function deriveThreadFeedPresentation(
       type: "working",
       id: "working-indicator-row",
       createdAt: activeWorkStartedAt,
+      activeSubagentCount,
     });
   }
   return result;

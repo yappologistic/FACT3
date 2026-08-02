@@ -175,7 +175,6 @@ function buildProps() {
   return {
     isWorking: false,
     activeTurnInProgress: false,
-    activeTurnStartedAt: null,
     listRef: createRef<LegendListRef | null>(),
     latestTurn: null,
     runningTurnId: null,
@@ -224,37 +223,14 @@ function buildUserTimelineEntry(text: string) {
 }
 
 describe("MessagesTimeline", () => {
-  it("renders the Thinking Orb while the agent is working", () => {
+  it("keeps the working status out of the scrolling timeline", () => {
     const markup = renderToStaticMarkup(
       <MessagesTimeline {...buildProps()} activeTurnInProgress isWorking timelineEntries={[]} />,
     );
 
-    expect(markup).toContain('role="status"');
-    expect(markup).toContain('aria-label="Thinking"');
-    expect(markup).toContain("Thinking…");
-    expect(markup).toContain("<canvas");
-    expect(markup).toContain("h-12");
-    expect(markup).toContain("text-sm");
-    expect(markup).not.toContain("border-border");
-    expect(markup).not.toContain("bg-muted/20");
-    expect(markup).not.toContain("shadow-sm");
-    expect(markup).not.toContain("w-[270px]");
-    expect(markup).not.toContain("Working for");
-  });
-
-  it("renders the Thinking Orb while the first turn is starting", () => {
-    const markup = renderToStaticMarkup(
-      <MessagesTimeline
-        {...buildProps()}
-        activeTurnInProgress
-        isWorking={false}
-        timelineEntries={[]}
-      />,
-    );
-
-    expect(markup).toContain('role="status"');
-    expect(markup).toContain('aria-label="Thinking"');
-    expect(markup).toContain("Thinking…");
+    expect(markup).not.toContain('data-chat-composer-activity="true"');
+    expect(markup).not.toContain("Thinking…");
+    expect(markup).not.toContain("<canvas");
   });
 
   it("uses Interior Text Reveal only while an assistant response is streaming", () => {

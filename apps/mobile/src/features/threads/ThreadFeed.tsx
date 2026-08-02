@@ -153,6 +153,7 @@ export interface ThreadFeedProps {
   readonly agentLabel: string;
   readonly latestTurn: ThreadFeedLatestTurn | null;
   readonly activeWorkStartedAt: string | null;
+  readonly activeSubagentCount: number;
   readonly listRef: RefObject<LegendListRef | null>;
   readonly freeze: SharedValue<boolean>;
   readonly anchorMessageId: MessageId | null;
@@ -842,7 +843,12 @@ function renderFeedEntry(
   const { markdownStyles, iconSubtleColor, userBubbleColor } = props;
 
   if (entry.type === "working") {
-    return <WorkingTimelineRow startedAt={entry.createdAt} />;
+    return (
+      <WorkingTimelineRow
+        startedAt={entry.createdAt}
+        activeSubagentCount={entry.activeSubagentCount}
+      />
+    );
   }
 
   if (entry.type === "turn-fold") {
@@ -1022,7 +1028,10 @@ function renderFeedEntry(
   );
 }
 
-const WorkingTimelineRow = memo(function WorkingTimelineRow(props: { readonly startedAt: string }) {
+const WorkingTimelineRow = memo(function WorkingTimelineRow(props: {
+  readonly startedAt: string;
+  readonly activeSubagentCount: number;
+}) {
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
@@ -1044,6 +1053,38 @@ const WorkingTimelineRow = memo(function WorkingTimelineRow(props: { readonly st
       <Text className="font-t3-medium text-xs tabular-nums text-neutral-600 dark:text-neutral-400">
         Working for {durationLabel}
       </Text>
+      {props.activeSubagentCount > 0 ? (
+        <Animated.View
+          accessibilityLabel={`${props.activeSubagentCount} ${props.activeSubagentCount === 1 ? "sub-agent" : "sub-agents"} running`}
+          className="ml-1 flex-row items-center gap-1.5 border-l border-neutral-200 pl-3 dark:border-white/10"
+          entering={FadeIn.duration(160)}
+          key={`subagents-${props.activeSubagentCount}`}
+        >
+          <View className="flex-row items-center pl-1">
+            {Array.from({ length: Math.min(props.activeSubagentCount, 3) }, (_, index) => (
+              <View
+                className={cn(
+                  "h-4 w-4 rounded-full border border-white dark:border-neutral-950",
+                  index === 0 ? "bg-sky-400" : index === 1 ? "bg-emerald-400" : "bg-fuchsia-400",
+                )}
+                key={index}
+                style={index === 0 ? undefined : { marginLeft: -5 }}
+              />
+            ))}
+            <View
+              className="h-4 min-w-4 items-center justify-center rounded-full border border-white bg-neutral-800 px-1 dark:border-neutral-950 dark:bg-neutral-200"
+              style={{ marginLeft: -5 }}
+            >
+              <Text className="font-t3-bold text-[9px] leading-none text-white dark:text-neutral-900">
+                {props.activeSubagentCount}
+              </Text>
+            </View>
+          </View>
+          <Text className="font-t3-medium text-xs text-neutral-600 dark:text-neutral-400">
+            {props.activeSubagentCount === 1 ? "sub-agent" : "sub-agents"}
+          </Text>
+        </Animated.View>
+      ) : null}
     </View>
   );
 });
@@ -1508,11 +1549,13 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         expandedTurnIds,
         expandedWorkGroupIds,
         props.activeWorkStartedAt,
+        props.activeSubagentCount,
       ),
     [
       expandedTurnIds,
       expandedWorkGroupIds,
       props.activeWorkStartedAt,
+      props.activeSubagentCount,
       props.feed,
       props.latestTurn,
     ],
