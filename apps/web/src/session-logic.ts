@@ -80,6 +80,11 @@ export interface WorkLogEntry {
   sourceActivityKind?: OrchestrationThreadActivity["kind"];
 }
 
+export interface ComposerActivitySummary {
+  readonly title: string;
+  readonly detail?: string;
+}
+
 interface DerivedWorkLogEntry extends WorkLogEntry {
   activityKind: OrchestrationThreadActivity["kind"];
   collapseKey?: string;
@@ -904,6 +909,169 @@ function asTrimmedString(value: unknown): string | null {
   }
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+const COMPOSER_ACTIVITY_TERMINAL_SUFFIX = /\s+(?:started|updated|complete|completed)\s*$/i;
+
+function composerActivityToolLabel(activity: OrchestrationThreadActivity): string {
+  const payload = asRecord(activity.payload);
+  const itemType = asTrimmedString(payload?.itemType);
+  const rawLabel = activity.summary.replace(COMPOSER_ACTIVITY_TERMINAL_SUFFIX, "").trim();
+
+  if (
+    itemType === "collab_agent_tool_call" ||
+    /(?:sub-?agent|spawn agent|collab)/i.test(rawLabel)
+  ) {
+    return "Coordinating sub-agents";
+  }
+  if (/(?:read file|read files)/i.test(rawLabel)) {
+    return "Reading files";
+  }
+  if (/(?:glob|grep|search files?|find files?)/i.test(rawLabel)) {
+    return "Searching files";
+  }
+  if (/(?:apply patch|file change|edit files?)/i.test(rawLabel)) {
+    return "Editing files";
+  }
+  if (/(?:web search|search the web)/i.test(rawLabel)) {
+    return "Searching the web";
+  }
+  if (/(?:command|exec)/i.test(rawLabel)) {
+    return "Running command";
+  }
+  return rawLabel || "Working";
+}
+
+function finiteActivityCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.floor(value)
+    : null;
+}
+
+function readActivityCount(
+  record: Record<string, unknown> | null,
+  keys: ReadonlyArray<string>,
+): number | null {
+  if (!record) return null;
+  for (const key of keys) {
+    const count = finiteActivityCount(record[key]);
+    if (count !== null) return count;
+  }
+  return null;
+}
+
+function composerActivityProgress(
+  activity: OrchestrationThreadActivity | null,
+): { readonly current: number; readonly total: number } | null {
+  if (!activity) return null;
+  const payload = asRecord(activity.payload);
+  const data = asRecord(payload?.data);
+  const candidates = [
+    asRecord(payload?.progress),
+    asRecord(data?.progress),
+    asRecord(payload?.usage),
+    payload,
+    data,
+  ];
+  for (const candidate of candidates) {
+    const current = readActivityCount(candidate, [
+      "current",
+      "completed",
+      "index",
+      "step",
+      "toolUses",
+      "tool_uses",
+    ]);
+    const total = readActivityCount(candidate, [
+      "total",
+      "totalSteps",
+      "total_steps",
+      "totalToolUses",
+      "total_tool_uses",
+    ]);
+    if (current !== null && total !== null && total > 0 && current <= total) {
+      return { current, total };
+    }
+  }
+  return null;
+}
+
+/**
+ * Derives compact live composer copy from provider-neutral thread activity.
+ * The component stays presentation-only while adapters supply the best task
+ * and tool summaries they have available.
+ */
+export function deriveComposerActivitySummary(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  activeTurnId?: TurnId | null,
+): ComposerActivitySummary {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  let latestTaskProgress: OrchestrationThreadActivity | null = null;
+  let latestToolActivity: OrchestrationThreadActivity | null = null;
+  const toolCallIds = new Set<string>();
+
+  for (const activity of ordered) {
+    if (
+      activeTurnId !== null &&
+      activeTurnId !== undefined &&
+      activity.turnId !== null &&
+      activity.turnId !== activeTurnId
+    ) {
+      continue;
+    }
+    if (activity.kind === "task.progress") {
+      latestTaskProgress = activity;
+      continue;
+    }
+    if (
+      activity.kind !== "tool.started" &&
+      activity.kind !== "tool.updated" &&
+      activity.kind !== "tool.completed"
+    ) {
+      continue;
+    }
+    latestToolActivity = activity;
+    const payload = asRecord(activity.payload);
+    toolCallIds.add(asTrimmedString(payload?.toolCallId) ?? activity.id);
+  }
+
+  const taskPayload = latestTaskProgress ? asRecord(latestTaskProgress.payload) : null;
+  const taskTitle =
+    asTrimmedString(taskPayload?.title) ??
+    (latestTaskProgress ? asTrimmedString(latestTaskProgress.summary) : null);
+  const toolLabel = latestToolActivity
+    ? composerActivityToolLabel(latestToolActivity)
+    : asTrimmedString(taskPayload?.lastToolName);
+  const explicitProgress =
+    composerActivityProgress(latestToolActivity) ?? composerActivityProgress(latestTaskProgress);
+  const progressLabel = explicitProgress
+    ? `${explicitProgress.current} of ${explicitProgress.total}`
+    : toolCallIds.size > 0
+      ? `${toolCallIds.size} ${toolCallIds.size === 1 ? "action" : "actions"}`
+      : null;
+
+  if (taskTitle) {
+    const taskDetail =
+      asTrimmedString(taskPayload?.summary) ?? asTrimmedString(taskPayload?.detail);
+    const detail = toolLabel
+      ? [toolLabel, progressLabel].filter(Boolean).join(" · ")
+      : taskDetail && taskDetail !== taskTitle
+        ? taskDetail
+        : undefined;
+    return {
+      title: taskTitle,
+      ...(detail ? { detail } : {}),
+    };
+  }
+
+  if (toolLabel) {
+    return {
+      title: toolLabel,
+      ...(progressLabel ? { detail: progressLabel } : {}),
+    };
+  }
+
+  return { title: "Thinking…" };
 }
 
 function asNumber(value: unknown): number | null {

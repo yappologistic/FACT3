@@ -13,10 +13,10 @@ export const SubagentActivityIndicator = memo(function SubagentActivityIndicator
   return (
     <span
       aria-hidden="true"
-      className="subagent-activity-indicator inline-flex shrink-0 items-center gap-2 border-l border-border/60 pl-3 text-xs text-muted-foreground"
+      className="subagent-activity-indicator grid shrink-0 justify-items-center border-l border-border/60 pl-3 text-muted-foreground"
       data-subagent-count={props.count}
     >
-      <span className="flex items-center pl-1">
+      <span className="subagent-activity-stack flex items-center">
         {Array.from({ length: visibleOrbCount }, (_, index) => (
           <span
             className="subagent-activity-orb"
@@ -29,7 +29,9 @@ export const SubagentActivityIndicator = memo(function SubagentActivityIndicator
           {props.count}
         </span>
       </span>
-      <span className="whitespace-nowrap">{props.count === 1 ? "sub-agent" : "sub-agents"}</span>
+      <span className="whitespace-nowrap text-[11px] leading-none">
+        {props.count === 1 ? "sub-agent" : "sub-agents"}
+      </span>
     </span>
   );
 });

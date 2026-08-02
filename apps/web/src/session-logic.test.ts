@@ -10,6 +10,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
+  deriveComposerActivitySummary,
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
@@ -47,6 +48,88 @@ function makeActivity(overrides: {
     ...(overrides.sequence !== undefined ? { sequence: overrides.sequence } : {}),
   };
 }
+
+describe("deriveComposerActivitySummary", () => {
+  it("keeps the quiet thinking fallback before a provider reports activity", () => {
+    expect(deriveComposerActivitySummary([], TurnId.make("turn-1"))).toEqual({
+      title: "Thinking…",
+    });
+  });
+
+  it("combines the latest task title with tool detail and explicit progress", () => {
+    const activities = [
+      makeActivity({
+        id: "task-progress",
+        kind: "task.progress",
+        summary: "Searching session lifecycle",
+        payload: {
+          title: "Searching session lifecycle",
+          summary: "Checking the current session state",
+        },
+        turnId: "turn-1",
+        sequence: 1,
+      }),
+      makeActivity({
+        id: "read-file",
+        kind: "tool.updated",
+        summary: "Read File",
+        payload: {
+          toolCallId: "read-1",
+          progress: { current: 3, total: 7 },
+        },
+        turnId: "turn-1",
+        sequence: 2,
+      }),
+    ];
+
+    expect(deriveComposerActivitySummary(activities, TurnId.make("turn-1"))).toEqual({
+      title: "Searching session lifecycle",
+      detail: "Reading files · 3 of 7",
+    });
+  });
+
+  it("falls back to observed actions when no total is available", () => {
+    const activities = [
+      makeActivity({
+        id: "read-one",
+        kind: "tool.completed",
+        summary: "Read File",
+        payload: { toolCallId: "read-1" },
+        turnId: "turn-1",
+        sequence: 1,
+      }),
+      makeActivity({
+        id: "read-two",
+        kind: "tool.started",
+        summary: "Read File started",
+        payload: { toolCallId: "read-2" },
+        turnId: "turn-1",
+        sequence: 2,
+      }),
+    ];
+
+    expect(deriveComposerActivitySummary(activities, TurnId.make("turn-1"))).toEqual({
+      title: "Reading files",
+      detail: "2 actions",
+    });
+  });
+
+  it("ignores activity from a different turn", () => {
+    const activities = [
+      makeActivity({
+        id: "old-search",
+        kind: "task.progress",
+        summary: "Searching the old turn",
+        payload: { title: "Searching the old turn" },
+        turnId: "turn-old",
+      }),
+    ];
+
+    expect(deriveComposerActivitySummary(activities, TurnId.make("turn-current"))).toEqual({
+      title: "Thinking…",
+    });
+  });
+});
 
 describe("derivePendingApprovals", () => {
   it("tracks open approvals and removes resolved ones", () => {

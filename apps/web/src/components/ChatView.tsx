@@ -78,6 +78,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   derivePhase,
+  deriveComposerActivitySummary,
   deriveTimelineEntries,
   deriveActivePlanState,
   findSidebarProposedPlan,
@@ -2035,13 +2036,15 @@ function ChatViewContent(props: ChatViewProps) {
   const sessionPhase = derivePhase(activeThread?.session ?? null);
   const phase = sessionPhase === "running" && latestTurnSettled ? "ready" : sessionPhase;
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const activeActivityTurnId =
+    activeThread?.session?.activeTurnId ?? activeLatestTurn?.turnId ?? null;
   const activeSubagentCount = useMemo(
-    () =>
-      deriveActiveSubagentCount(
-        threadActivities,
-        activeThread?.session?.activeTurnId ?? activeLatestTurn?.turnId ?? null,
-      ),
-    [activeLatestTurn?.turnId, activeThread?.session?.activeTurnId, threadActivities],
+    () => deriveActiveSubagentCount(threadActivities, activeActivityTurnId),
+    [activeActivityTurnId, threadActivities],
+  );
+  const composerActivity = useMemo(
+    () => deriveComposerActivitySummary(threadActivities, activeActivityTurnId),
+    [activeActivityTurnId, threadActivities],
   );
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const pendingApprovals = useMemo(
@@ -5879,6 +5882,7 @@ function ChatViewContent(props: ChatViewProps) {
                   {!isDraftHeroState && activeTurnInProgress ? (
                     <div className="mx-auto w-full max-w-3xl">
                       <ComposerActivityStatus
+                        activity={composerActivity}
                         activeSubagentCount={activeSubagentCount}
                         theme={resolvedTheme}
                       />
