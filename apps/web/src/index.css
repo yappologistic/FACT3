@@ -224,13 +224,24 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 .composer-activity-panel-menu {
   border-color: color-mix(in oklab, var(--foreground) 10%, transparent);
   background: color-mix(in oklab, var(--background) 76%, transparent);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
   -webkit-backdrop-filter: blur(12px) saturate(1.08);
   backdrop-filter: blur(12px) saturate(1.08);
 }
 
+.composer-activity-panel {
+  box-shadow: none;
+}
+
 .composer-activity-panel-menu {
   box-shadow: 0 10px 30px rgb(0 0 0 / 28%);
+}
+
+.composer-activity-popover-shell {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 .composer-activity-copy-line,

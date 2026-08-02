@@ -300,7 +300,7 @@ function ComposerActivityPanel(props: {
         : props.details.tasks.length;
 
   return (
-    <div className="composer-activity-panel w-[min(38rem,calc(100vw-2rem))] overflow-hidden rounded-[20px] border">
+    <div className="composer-activity-panel w-[min(38rem,calc(100vw-2rem))] overflow-hidden rounded-[34px] border">
       <PopoverTitle className="sr-only">Agent activity details</PopoverTitle>
       <div className="flex min-h-12 items-center justify-between gap-3 px-3.5">
         <Select
@@ -309,7 +309,7 @@ function ComposerActivityPanel(props: {
         >
           <SelectTrigger
             aria-label="Activity category"
-            className="-ml-1 min-h-8 w-auto min-w-36 rounded-xl border-transparent bg-transparent px-2 text-[13px] font-medium shadow-none before:hidden hover:bg-foreground/[0.045]"
+            className="-ml-1 min-h-8 w-auto min-w-36 rounded-[16px] border-transparent bg-transparent px-2 text-[13px] font-normal shadow-none before:hidden hover:bg-foreground/[0.045]"
             size="sm"
           >
             <SectionIcon aria-hidden className="size-3.5 text-muted-foreground" />
@@ -318,7 +318,7 @@ function ComposerActivityPanel(props: {
           <SelectPopup
             align="start"
             className="min-w-44"
-            popupClassName="composer-activity-panel-menu rounded-xl!"
+            popupClassName="composer-activity-panel-menu rounded-[20px]!"
             positionerClassName="z-[80]"
             side="bottom"
             sideOffset={5}
@@ -349,7 +349,7 @@ function ComposerActivityPanel(props: {
         </span>
       </div>
 
-      <div className="mx-2 mb-2 overflow-hidden rounded-[15px] border border-border/55 bg-foreground/[0.025]">
+      <div className="mx-2 mb-2 overflow-hidden rounded-[28px] border border-border/55 bg-foreground/[0.025]">
         <ul
           aria-live={props.isActive ? "polite" : "off"}
           className="activity-panel-list max-h-[19rem] overflow-y-auto overscroll-contain"
@@ -469,7 +469,7 @@ export const ComposerActivityStatus = memo(function ComposerActivityStatus(props
         />
         <PopoverPopup
           align="center"
-          className="max-w-none border-0! bg-transparent! p-0 shadow-none! before:hidden"
+          className="composer-activity-popover-shell max-w-none p-0 before:hidden"
           side="top"
           sideOffset={8}
           viewportClassName="overflow-visible p-0! [--viewport-inline-padding:0px]"
