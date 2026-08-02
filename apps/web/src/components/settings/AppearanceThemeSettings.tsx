@@ -13,6 +13,7 @@ import {
 } from "../../lib/themeCatalog";
 import { cn } from "../../lib/utils";
 import { Button } from "../ui/button";
+import { ColorPicker } from "../ui/color-picker";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
 import { SettingResetButton, SettingsRow } from "./settingsLayout";
@@ -120,16 +121,11 @@ function ColorControl(props: {
         ) : null
       }
       control={
-        <label className="flex h-8 min-w-32 items-center gap-2 rounded-md border border-border bg-card px-2 text-xs font-medium text-foreground">
-          <input
-            aria-label={`${props.mode} ${props.label.toLowerCase()} color`}
-            className="size-4 cursor-pointer appearance-none overflow-hidden rounded-full border border-border bg-transparent p-0 [&::-webkit-color-swatch]:border-0 [&::-webkit-color-swatch-wrapper]:p-0"
-            type="color"
-            value={props.value}
-            onChange={(event) => props.onChange(event.currentTarget.value)}
-          />
-          <span className="font-mono uppercase tabular-nums">{props.value}</span>
-        </label>
+        <ColorPicker
+          label={`${props.mode} ${props.label.toLowerCase()} color`}
+          value={props.value}
+          onValueChange={props.onChange}
+        />
       }
     />
   );

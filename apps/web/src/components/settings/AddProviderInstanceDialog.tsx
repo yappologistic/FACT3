@@ -12,7 +12,9 @@ import {
 import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { normalizeProviderAccentColor } from "../../providerInstances";
+import { ColorSelector } from "../color-selector";
 import { Button } from "../ui/button";
+import { ColorPicker } from "../ui/color-picker";
 import { ACPRegistryIcon, Gemini, GithubCopilotIcon, PiAgentIcon, type Icon } from "../Icons";
 import {
   Dialog,
@@ -342,33 +344,20 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
               <div className={cn("grid gap-2", wizardStep !== 1 && "hidden")}>
                 <span className="text-xs font-medium text-foreground">Accent color</span>
                 <div className="flex min-w-0 flex-wrap items-center gap-2">
-                  <input
-                    type="color"
+                  <ColorPicker
                     value={normalizeProviderAccentColor(accentColor) ?? PROVIDER_ACCENT_SWATCHES[0]}
-                    onChange={(event) => setAccentColor(event.target.value)}
-                    aria-label="Provider instance accent color"
-                    className="h-8 w-10 cursor-pointer rounded-xl border border-input bg-background p-0.5"
+                    onValueChange={setAccentColor}
+                    label="Provider instance accent color"
+                    align="start"
                   />
-                  <div className="flex flex-wrap gap-1.5">
-                    {PROVIDER_ACCENT_SWATCHES.map((swatch) => {
-                      const selected = accentColor.toLowerCase() === swatch;
-                      return (
-                        <button
-                          key={swatch}
-                          type="button"
-                          className={cn(
-                            "size-6 cursor-pointer rounded-full border transition",
-                            selected
-                              ? "scale-110 border-foreground ring-2 ring-ring ring-offset-1 ring-offset-background"
-                              : "border-black/10 hover:scale-105 dark:border-white/20",
-                          )}
-                          style={{ backgroundColor: swatch }}
-                          onClick={() => setAccentColor(swatch)}
-                          aria-label={`Use ${swatch} accent`}
-                        />
-                      );
-                    })}
-                  </div>
+                  <ColorSelector
+                    key={accentColor.toLowerCase()}
+                    colors={[...PROVIDER_ACCENT_SWATCHES]}
+                    defaultValue={accentColor.toLowerCase()}
+                    size="lg"
+                    onColorSelect={setAccentColor}
+                    className="flex-wrap gap-1.5"
+                  />
                   {accentColor ? (
                     <Button
                       type="button"
