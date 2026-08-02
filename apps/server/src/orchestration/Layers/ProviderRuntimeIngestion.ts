@@ -232,7 +232,10 @@ function buildCollabAgentActivitySnapshot(
   if (item.type === "subAgentActivity") {
     const agentThreadId = typeof item.agentThreadId === "string" ? item.agentThreadId : undefined;
     const kind = typeof item.kind === "string" ? item.kind : undefined;
-    if (!agentThreadId || !kind) {
+    const agentPath = typeof item.agentPath === "string" ? item.agentPath : undefined;
+    // A child can report an interaction with the root agent. That is routing
+    // metadata, not another spawned sub-agent, so it must not affect the count.
+    if (!agentThreadId || !kind || agentPath === "/root") {
       return undefined;
     }
     return {

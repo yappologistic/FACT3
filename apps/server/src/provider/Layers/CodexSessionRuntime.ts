@@ -597,16 +597,28 @@ function readRouteFields(notification: CodexServerNotification): {
   }
 }
 
-interface CollabReceiverRoute {
+export interface CollabReceiverRoute {
   readonly parentTurnId: TurnId;
   readonly itemId: ProviderItemId;
   readonly agentPath?: string;
+}
+
+export function resolveCollabReceiverRoute(
+  collabReceiverTurns: ReadonlyMap<string, CollabReceiverRoute>,
+  providerConversationId: string | undefined,
+  mainProviderThreadId: string | undefined,
+): CollabReceiverRoute | undefined {
+  if (!providerConversationId || providerConversationId === mainProviderThreadId) {
+    return undefined;
+  }
+  return collabReceiverTurns.get(providerConversationId);
 }
 
 function rememberCollabReceiverTurns(
   collabReceiverTurns: Map<string, CollabReceiverRoute>,
   notification: CodexServerNotification,
   parentTurnId: TurnId | undefined,
+  mainProviderThreadId: string | undefined,
 ): void {
   if (!parentTurnId) {
     return;
@@ -618,6 +630,12 @@ function rememberCollabReceiverTurns(
 
   const item = notification.params.item;
   if (item.type === "subAgentActivity") {
+    // Child agents also emit activity when they interact with the root agent.
+    // Routing that marker back as a child causes the root turn/completed event
+    // to be swallowed, leaving the thread permanently marked as running.
+    if (item.agentPath === "/root" || item.agentThreadId === mainProviderThreadId) {
+      return;
+    }
     collabReceiverTurns.set(item.agentThreadId, {
       parentTurnId,
       itemId: ProviderItemId.make(item.id),
@@ -631,6 +649,9 @@ function rememberCollabReceiverTurns(
   }
 
   for (const receiverThreadId of item.receiverThreadIds) {
+    if (receiverThreadId === mainProviderThreadId) {
+      continue;
+    }
     collabReceiverTurns.set(receiverThreadId, {
       parentTurnId,
       itemId: ProviderItemId.make(item.id),
@@ -860,15 +881,26 @@ export const makeCodexSessionRuntime = (
         const payload = notification.params;
         const route = readRouteFields(notification);
         const collabReceiverTurns = yield* Ref.get(collabReceiverTurnsRef);
-        const childRoute = (() => {
-          const providerConversationId = readNotificationThreadId(notification);
-          return providerConversationId
-            ? collabReceiverTurns.get(providerConversationId)
-            : undefined;
-        })();
+        const mainProviderThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
+        const providerConversationId = readNotificationThreadId(notification);
+        const childRoute = resolveCollabReceiverRoute(
+          collabReceiverTurns,
+          providerConversationId,
+          mainProviderThreadId,
+        );
         const childParentTurnId = childRoute?.parentTurnId;
 
-        rememberCollabReceiverTurns(collabReceiverTurns, notification, route.turnId);
+        // Repair any route polluted by an older root activity marker before
+        // handling this notification. The root conversation always wins.
+        if (providerConversationId && providerConversationId === mainProviderThreadId) {
+          collabReceiverTurns.delete(providerConversationId);
+        }
+        rememberCollabReceiverTurns(
+          collabReceiverTurns,
+          notification,
+          route.turnId,
+          mainProviderThreadId,
+        );
         if (childRoute && notification.method === "turn/completed") {
           const agentThreadId = notification.params.threadId;
           collabReceiverTurns.delete(agentThreadId);

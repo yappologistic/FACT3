@@ -4,7 +4,7 @@ import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { describe } from "vite-plus/test";
-import { DEFAULT_MODEL, ThreadId } from "@t3tools/contracts";
+import { DEFAULT_MODEL, ProviderItemId, ThreadId, TurnId } from "@t3tools/contracts";
 import * as CodexErrors from "effect-codex-app-server/errors";
 import * as CodexRpc from "effect-codex-app-server/rpc";
 
@@ -18,8 +18,34 @@ import {
   buildTurnStartParams,
   isRecoverableThreadResumeError,
   openCodexThread,
+  resolveCollabReceiverRoute,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
+
+describe("resolveCollabReceiverRoute", () => {
+  const route = {
+    parentTurnId: TurnId.make("turn-parent"),
+    itemId: ProviderItemId.make("spawn-call"),
+  };
+
+  it("never treats the main provider conversation as a child route", () => {
+    const routes = new Map([["provider-root", route]]);
+
+    NodeAssert.equal(
+      resolveCollabReceiverRoute(routes, "provider-root", "provider-root"),
+      undefined,
+    );
+  });
+
+  it("continues routing an actual child conversation to its parent turn", () => {
+    const routes = new Map([["provider-child", route]]);
+
+    NodeAssert.strictEqual(
+      resolveCollabReceiverRoute(routes, "provider-child", "provider-root"),
+      route,
+    );
+  });
+});
 
 describe("CodexSessionRuntimeIdentifierGenerationError", () => {
   it("retains identifier purpose and the random source failure", () => {

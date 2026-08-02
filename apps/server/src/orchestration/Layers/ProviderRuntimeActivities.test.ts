@@ -91,4 +91,33 @@ describe("runtimeEventToActivities collaboration metadata", () => {
     });
     expect(JSON.stringify(payload.collab)).not.toContain("review_web");
   });
+
+  it("does not project root-agent interaction markers as spawned sub-agents", () => {
+    const event = {
+      type: "item.updated",
+      eventId: EventId.make("root-agent-interaction"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: ThreadId.make("thread-1"),
+      turnId: TurnId.make("turn-1"),
+      itemId: RuntimeItemId.make("root-interaction-1"),
+      createdAt: "2026-08-01T00:00:00.000Z",
+      payload: {
+        itemType: "collab_agent_tool_call",
+        data: {
+          item: {
+            id: "root-interaction-1",
+            type: "subAgentActivity",
+            kind: "interacted",
+            agentPath: "/root",
+            agentThreadId: "provider-root",
+          },
+        },
+      },
+    } satisfies ProviderRuntimeEvent;
+
+    const [activity] = runtimeEventToActivities(event);
+    const payload = activity?.payload as Record<string, unknown>;
+
+    expect(payload.collab).toBeUndefined();
+  });
 });

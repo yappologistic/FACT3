@@ -1585,12 +1585,24 @@ describe("isLatestTurnSettled", () => {
     completedAt: "2026-02-27T21:10:06.000Z",
   } as const;
 
-  it("returns false while the same turn is still active in a running session", () => {
+  it("returns true when a completed turn has a stale matching running session", () => {
     expect(
       isLatestTurnSettled(latestTurn, {
         status: "running",
         activeTurnId: TurnId.make("turn-1"),
       }),
+    ).toBe(true);
+  });
+
+  it("returns false while the same turn is genuinely still active", () => {
+    expect(
+      isLatestTurnSettled(
+        { ...latestTurn, completedAt: null },
+        {
+          status: "running",
+          activeTurnId: TurnId.make("turn-1"),
+        },
+      ),
     ).toBe(false);
   });
 
@@ -1609,6 +1621,18 @@ describe("isLatestTurnSettled", () => {
         status: "ready",
         activeTurnId: null,
       }),
+    ).toBe(true);
+  });
+
+  it("trusts a ready session while the completed turn snapshot catches up", () => {
+    expect(
+      isLatestTurnSettled(
+        { ...latestTurn, completedAt: null },
+        {
+          status: "ready",
+          activeTurnId: null,
+        },
+      ),
     ).toBe(true);
   });
 

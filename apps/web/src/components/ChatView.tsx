@@ -2032,7 +2032,8 @@ function ChatViewContent(props: ChatViewProps) {
     selectedProviderByThreadId ?? threadProvider,
   );
   const selectedProvider: ProviderDriverKind = lockedProvider ?? unlockedSelectedProvider;
-  const phase = derivePhase(activeThread?.session ?? null);
+  const sessionPhase = derivePhase(activeThread?.session ?? null);
+  const phase = sessionPhase === "running" && latestTurnSettled ? "ready" : sessionPhase;
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const activeSubagentCount = useMemo(
     () =>

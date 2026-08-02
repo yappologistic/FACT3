@@ -295,14 +295,27 @@ export function isLatestTurnSettled(
   latestTurn: LatestTurnTiming | null,
   session: SessionActivityState | null,
 ): boolean {
-  if (session?.status === "starting" || session?.status === "running") return false;
+  if (session) {
+    if (session.status === "starting") return false;
+    if (session.status === "running") {
+      // A matching completed turn is authoritative even if a delayed or dropped
+      // session update left the read model marked as running. A different active
+      // turn still means newer work is in flight.
+      return Boolean(
+        latestTurn &&
+        latestTurn.turnId === session.activeTurnId &&
+        latestTurn.startedAt &&
+        latestTurn.completedAt,
+      );
+    }
+
+    // Session state and latest-turn state are projected independently. Once the
+    // session is idle or terminal, do not keep the composer busy while a stale
+    // latest-turn snapshot catches up.
+    return true;
+  }
   if (!latestTurn) return true;
-  if (latestTurn.startedAt && latestTurn.completedAt) return true;
-  return (
-    session?.status === "interrupted" ||
-    session?.status === "stopped" ||
-    session?.status === "error"
-  );
+  return Boolean(latestTurn.startedAt && latestTurn.completedAt);
 }
 
 export function deriveActiveWorkStartedAt(

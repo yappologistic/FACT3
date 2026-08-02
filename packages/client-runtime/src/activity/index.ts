@@ -66,10 +66,19 @@ export function deriveActiveSubagentCount(
     }
 
     const collab = asRecord(payload.collab);
+    const dataItem = asRecord(asRecord(payload.data)?.item) ?? asRecord(payload.data);
+    const rootAgentThreadId =
+      dataItem?.type === "subAgentActivity" && dataItem.agentPath === "/root"
+        ? asString(dataItem.agentThreadId)
+        : null;
     const agentStates = asRecord(collab?.agentsStates);
     let hasAgentStateSnapshot = false;
     if (agentStates) {
       for (const [agentId, rawState] of Object.entries(agentStates)) {
+        if (agentId === rootAgentThreadId) {
+          activeAgentIds.delete(agentId);
+          continue;
+        }
         const status = asString(asRecord(rawState)?.status);
         if (!status) {
           continue;
@@ -89,7 +98,9 @@ export function deriveActiveSubagentCount(
     const tool = asString(collab?.tool);
     if (!hasAgentStateSnapshot && receiverThreadIds.length > 0) {
       if (tool === "spawnAgent" || tool === "resumeAgent") {
-        for (const agentId of receiverThreadIds) activeAgentIds.add(agentId);
+        for (const agentId of receiverThreadIds) {
+          if (agentId !== rootAgentThreadId) activeAgentIds.add(agentId);
+        }
       } else if (tool === "closeAgent") {
         for (const agentId of receiverThreadIds) activeAgentIds.delete(agentId);
       }

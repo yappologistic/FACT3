@@ -122,6 +122,35 @@ describe("deriveActiveSubagentCount", () => {
     expect(deriveActiveSubagentCount(activities, turnId)).toBe(0);
   });
 
+  it("does not count a child interaction with the root agent as a sub-agent", () => {
+    const activities = [
+      activity(
+        "root-interaction",
+        "tool.updated",
+        {
+          itemType: "collab_agent_tool_call",
+          toolCallId: "root-interaction",
+          data: {
+            item: {
+              type: "subAgentActivity",
+              kind: "interacted",
+              agentPath: "/root",
+              agentThreadId: "provider-root",
+            },
+          },
+          collab: {
+            tool: "spawnAgent",
+            receiverThreadIds: ["provider-root"],
+            agentsStates: { "provider-root": { status: "running" } },
+          },
+        },
+        1,
+      ),
+    ];
+
+    expect(deriveActiveSubagentCount(activities, turnId)).toBe(0);
+  });
+
   it("ignores collaboration work from earlier turns", () => {
     const oldTurnActivity = {
       ...activity(
