@@ -1,8 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
-import { ComposerActivityStatus, SubagentActivityRow } from "./ComposerActivityStatus";
+import {
+  ComposerActivityStatus,
+  SubagentActivityRow,
+  ToolActivityRow,
+} from "./ComposerActivityStatus";
 import { SubagentAvatar } from "./SubagentActivityIndicator";
-import type { ComposerActivityDetails } from "./composerActivityDetails";
+import type { ComposerActivityDetails, ComposerToolActivityItem } from "./composerActivityDetails";
 
 const EMPTY_DETAILS: ComposerActivityDetails = {
   tools: [],
@@ -120,6 +124,50 @@ describe("ComposerActivityStatus", () => {
     expect(markup).toContain("Searching files");
     expect(markup).toContain("font-mono");
     expect(markup).toContain("deriveTimelineEntries");
+  });
+
+  it("uses action-specific icons for completed tool calls", () => {
+    const item = (
+      id: string,
+      title: string,
+      itemType: NonNullable<ComposerToolActivityItem["itemType"]>,
+    ): ComposerToolActivityItem => ({
+      id,
+      title,
+      itemType,
+      status: "completed",
+      createdAt: "2026-08-02T00:00:00.000Z",
+      rawData: {},
+    });
+    const items: ReadonlyArray<ComposerToolActivityItem> = [
+      item("command", "Running command", "command_execution"),
+      item("web", "Searching the web", "web_search"),
+      item("edit", "Editing files", "file_change"),
+      item("image", "Viewing image", "image_view"),
+      item("mcp", "Calling integration", "mcp_tool_call"),
+      item("dynamic", "Running tool", "dynamic_tool_call"),
+      item("search", "Searching files", "mcp_tool_call"),
+    ];
+    const markup = renderToStaticMarkup(
+      <div>
+        {items.map((item) => (
+          <ToolActivityRow item={item} key={item.id} />
+        ))}
+      </div>,
+    );
+
+    for (const icon of [
+      "terminal",
+      "globe",
+      "square-pen",
+      "eye",
+      "wrench",
+      "hammer",
+      "file-search",
+    ]) {
+      expect(markup).toContain(`lucide-${icon}`);
+    }
+    expect(markup).not.toContain("lucide-check");
   });
 
   it("keeps a completed summary with persistent history", () => {

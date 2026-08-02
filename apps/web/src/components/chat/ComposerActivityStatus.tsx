@@ -4,8 +4,14 @@ import {
   ChevronRightIcon,
   CircleAlertIcon,
   CircleIcon,
+  EyeIcon,
+  FileSearchIcon,
+  GlobeIcon,
+  HammerIcon,
   ListTodoIcon,
+  SquarePenIcon,
   TerminalIcon,
+  WrenchIcon,
 } from "lucide-react";
 import { memo, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { ThinkingOrb } from "thinking-orbs";
@@ -64,6 +70,48 @@ function StaticStatusIcon({ status }: { readonly status: ComposerActivityItemSta
     return <CircleAlertIcon aria-hidden className="size-3.5 text-destructive" />;
   }
   return <CircleIcon aria-hidden className="size-3.5 text-muted-foreground/55" />;
+}
+
+function toolActivityIcon(item: ComposerToolActivityItem) {
+  switch (item.itemType) {
+    case "command_execution":
+      return TerminalIcon;
+    case "file_change":
+      return SquarePenIcon;
+    case "web_search":
+      return GlobeIcon;
+    case "image_view":
+      return EyeIcon;
+  }
+
+  const label = `${item.title} ${item.detail ?? ""}`.toLowerCase();
+  if (/\b(?:web|browser|url|https?)\b/u.test(label)) return GlobeIcon;
+  if (/\b(?:edit|patch|write|create|delete|move|rename|change)\b/u.test(label)) {
+    return SquarePenIcon;
+  }
+  if (/\b(?:read|view|inspect|open|image|screenshot)\b/u.test(label)) return EyeIcon;
+  if (/\b(?:search(?:ing|ed)?|find|grep|rg)\b/u.test(label)) return FileSearchIcon;
+  if (/\b(?:command|terminal|shell|exec|run)\b/u.test(label)) return TerminalIcon;
+
+  if (item.itemType === "mcp_tool_call") return WrenchIcon;
+  if (item.itemType === "dynamic_tool_call") return HammerIcon;
+  return WrenchIcon;
+}
+
+function ToolActivityIcon({ item }: { readonly item: ComposerToolActivityItem }) {
+  if (item.status === "failed" || item.status === "stopped") {
+    return <StaticStatusIcon status={item.status} />;
+  }
+  const Icon = toolActivityIcon(item);
+  return (
+    <Icon
+      aria-hidden
+      className={cn(
+        "size-3.5",
+        item.status === "running" ? "text-foreground/85" : "text-muted-foreground",
+      )}
+    />
+  );
 }
 
 function ActivityRowShell(props: {
@@ -138,7 +186,7 @@ function ActivityRowShell(props: {
   );
 }
 
-const ToolActivityRow = memo(function ToolActivityRow(props: {
+export const ToolActivityRow = memo(function ToolActivityRow(props: {
   readonly item: ComposerToolActivityItem;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -148,13 +196,7 @@ const ToolActivityRow = memo(function ToolActivityRow(props: {
       {...(props.item.detailKind ? { detailKind: props.item.detailKind } : {})}
       expandable
       expanded={expanded}
-      leading={
-        props.item.status === "running" ? (
-          <TerminalIcon aria-hidden className="size-3.5 text-muted-foreground" />
-        ) : (
-          <StaticStatusIcon status={props.item.status} />
-        )
-      }
+      leading={<ToolActivityIcon item={props.item} />}
       onToggle={() => setExpanded((value) => !value)}
       status={props.item.status}
       title={props.item.title}
