@@ -88,29 +88,100 @@ describe("deriveComposerActivitySummary", () => {
     });
   });
 
-  it("falls back to observed actions when no total is available", () => {
+  it("shows the purpose and exact command instead of a generic action count", () => {
     const activities = [
       makeActivity({
-        id: "read-one",
-        kind: "tool.completed",
-        summary: "Read File",
-        payload: { toolCallId: "read-1" },
+        id: "command-one",
+        kind: "tool.started",
+        summary: "Ran command started",
+        payload: {
+          itemType: "command_execution",
+          toolCallId: "command-1",
+          detail:
+            '"C:\\Program Files\\PowerShell\\7\\pwsh.exe" -Command \'rg -n "deriveTimelineEntries" apps/web/src\'',
+        },
+        turnId: "turn-1",
+      }),
+    ];
+
+    expect(deriveComposerActivitySummary(activities, TurnId.make("turn-1"))).toEqual({
+      title: "Searching files",
+      detail: 'rg -n "deriveTimelineEntries" apps/web/src',
+      detailKind: "command",
+    });
+  });
+
+  it("describes collaboration waits without accumulating action counts", () => {
+    const activities = [
+      makeActivity({
+        id: "wait-one",
+        kind: "tool.started",
+        summary: "Tool started",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          toolCallId: "wait-1",
+          collab: { tool: "wait" },
+        },
+        turnId: "turn-1",
+      }),
+    ];
+
+    expect(deriveComposerActivitySummary(activities, TurnId.make("turn-1"))).toEqual({
+      title: "Waiting for sub-agents",
+    });
+  });
+
+  it("prefers an active wait over a command that already finished", () => {
+    const activities = [
+      makeActivity({
+        id: "wait-one",
+        kind: "tool.started",
+        summary: "Tool started",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          toolCallId: "wait-1",
+          collab: { tool: "wait" },
+        },
         turnId: "turn-1",
         sequence: 1,
       }),
       makeActivity({
-        id: "read-two",
-        kind: "tool.started",
-        summary: "Read File started",
-        payload: { toolCallId: "read-2" },
+        id: "command-one",
+        kind: "tool.completed",
+        summary: "Ran command",
+        payload: {
+          itemType: "command_execution",
+          toolCallId: "command-1",
+          detail: "rg --files apps/web/src",
+        },
         turnId: "turn-1",
         sequence: 2,
       }),
     ];
 
     expect(deriveComposerActivitySummary(activities, TurnId.make("turn-1"))).toEqual({
-      title: "Reading files",
-      detail: "2 actions",
+      title: "Waiting for sub-agents",
+    });
+  });
+
+  it("shows edited files in the live activity detail", () => {
+    const activities = [
+      makeActivity({
+        id: "edit-one",
+        kind: "tool.updated",
+        summary: "File change updated",
+        payload: {
+          itemType: "file_change",
+          toolCallId: "edit-1",
+          data: { changes: [{ path: "apps/web/src/session-logic.ts" }] },
+        },
+        turnId: "turn-1",
+      }),
+    ];
+
+    expect(deriveComposerActivitySummary(activities, TurnId.make("turn-1"))).toEqual({
+      title: "Editing files",
+      detail: "apps/web/src/session-logic.ts",
     });
   });
 
@@ -1619,6 +1690,25 @@ describe("deriveTimelineEntries", () => {
         implementationThreadId: null,
       },
     });
+  });
+
+  it("omits inline work entries when live activity is owned by the composer pill", () => {
+    const entries = deriveTimelineEntries(
+      [],
+      [],
+      [
+        {
+          id: "work-1",
+          createdAt: "2026-02-23T00:00:03.000Z",
+          label: "Ran command",
+          command: 'rg -n "tool call" apps/web/src',
+          tone: "tool",
+        },
+      ],
+      { includeWorkEntries: false },
+    );
+
+    expect(entries).toEqual([]);
   });
 });
 

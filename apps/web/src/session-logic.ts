@@ -83,6 +83,7 @@ export interface WorkLogEntry {
 export interface ComposerActivitySummary {
   readonly title: string;
   readonly detail?: string;
+  readonly detailKind?: "command";
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
@@ -913,33 +914,167 @@ function asTrimmedString(value: unknown): string | null {
 
 const COMPOSER_ACTIVITY_TERMINAL_SUFFIX = /\s+(?:started|updated|complete|completed)\s*$/i;
 
-function composerActivityToolLabel(activity: OrchestrationThreadActivity): string {
+interface ComposerToolPresentation extends ComposerActivitySummary {
+  readonly coordination: boolean;
+}
+
+function composerActivityCollabTitle(payload: Record<string, unknown> | null): string {
+  const collab = asRecord(payload?.collab);
+  const tool = asTrimmedString(collab?.tool)?.toLowerCase();
+  if (tool === "spawn_agent") {
+    return "Starting sub-agents";
+  }
+  if (tool === "wait") {
+    return "Waiting for sub-agents";
+  }
+  return "Coordinating sub-agents";
+}
+
+function composerCommandTitle(command: string): string {
+  const normalized = command.toLowerCase();
+  if (
+    /(?:^|[;&|]\s*|\s)(?:vp\s+(?:test|run\s+test)|vitest|jest|pytest|cargo\s+test|go\s+test|npm\s+(?:run\s+)?test|pnpm\s+(?:run\s+)?test|bun\s+(?:run\s+)?test)\b/i.test(
+      normalized,
+    )
+  ) {
+    return "Running tests";
+  }
+  if (
+    /(?:^|[;&|]\s*|\s)(?:vp\s+(?:run\s+)?typecheck|tsgo\b[^;&|]*--noemit|tsc\b[^;&|]*--noemit)/i.test(
+      normalized,
+    )
+  ) {
+    return "Checking types";
+  }
+  if (
+    /(?:^|[;&|]\s*|\s)(?:vp\s+(?:run\s+)?build|npm\s+run\s+build|pnpm\s+(?:run\s+)?build|bun\s+run\s+build|vite\s+build|cargo\s+build)\b/i.test(
+      normalized,
+    )
+  ) {
+    return "Building project";
+  }
+  if (/(?:^|[;&|]\s*|\s)(?:vp\s+fmt|prettier|biome\s+(?:format|check))\b/i.test(normalized)) {
+    return "Formatting files";
+  }
+  if (/\bgit\s+(?:status|diff|show|log)\b/i.test(normalized)) {
+    return "Reviewing changes";
+  }
+  if (/\bgit\s+(?:add|commit)\b/i.test(normalized)) {
+    return "Saving changes";
+  }
+
+  const readsFiles = /(?:^|[;&|]\s*|\s)(?:get-content|cat|head|tail|type\s+|sed\s+-n)\b/i.test(
+    normalized,
+  );
+  const searchesFiles =
+    /(?:^|[;&|]\s*|\s)(?:rg|ripgrep|grep|findstr|select-string|fd|find|get-childitem|ls|dir)\b/i.test(
+      normalized,
+    );
+  if (readsFiles && searchesFiles) {
+    return "Inspecting files";
+  }
+  if (searchesFiles) {
+    return "Searching files";
+  }
+  if (readsFiles) {
+    return "Reading files";
+  }
+  return "Running command";
+}
+
+function composerActivityFileDetail(
+  payload: Record<string, unknown> | null,
+  fallbackDetail: string | null,
+): string | undefined {
+  const files = extractChangedFiles(payload);
+  if (files.length === 1) {
+    return truncateInlinePreview(files[0] ?? "");
+  }
+  if (files.length > 1) {
+    const first = truncateInlinePreview(files[0] ?? "", 64);
+    return `${first} +${files.length - 1}`;
+  }
+  return fallbackDetail ? truncateInlinePreview(fallbackDetail) : undefined;
+}
+
+function composerActivityToolPresentation(
+  activity: OrchestrationThreadActivity,
+): ComposerToolPresentation {
   const payload = asRecord(activity.payload);
   const itemType = asTrimmedString(payload?.itemType);
-  const rawLabel = activity.summary.replace(COMPOSER_ACTIVITY_TERMINAL_SUFFIX, "").trim();
+  const payloadTitle = extractToolTitle(payload);
+  const rawLabel = (payloadTitle ?? activity.summary)
+    .replace(COMPOSER_ACTIVITY_TERMINAL_SUFFIX, "")
+    .trim();
+  const rawDetail = asTrimmedString(payload?.detail);
+  const detail = rawDetail ? stripTrailingExitCode(rawDetail).output : null;
 
   if (
     itemType === "collab_agent_tool_call" ||
     /(?:sub-?agent|spawn agent|collab)/i.test(rawLabel)
   ) {
-    return "Coordinating sub-agents";
+    return {
+      title: composerActivityCollabTitle(payload),
+      coordination: true,
+    };
+  }
+  if (itemType === "command_execution" || /(?:command|exec|terminal)/i.test(rawLabel)) {
+    const command = extractToolCommand(payload).command;
+    return {
+      title: command ? composerCommandTitle(command) : "Running command",
+      ...(command
+        ? {
+            detail: truncateInlinePreview(normalizeInlinePreview(command), 112),
+            detailKind: "command",
+          }
+        : {}),
+      coordination: false,
+    };
+  }
+  if (itemType === "file_change" || /(?:apply patch|file change|edit files?)/i.test(rawLabel)) {
+    const fileDetail = composerActivityFileDetail(payload, detail);
+    return {
+      title: "Editing files",
+      ...(fileDetail ? { detail: fileDetail } : {}),
+      coordination: false,
+    };
+  }
+  if (itemType === "web_search" || /(?:web search|search the web)/i.test(rawLabel)) {
+    return {
+      title: "Searching the web",
+      ...(detail ? { detail: truncateInlinePreview(detail) } : {}),
+      coordination: false,
+    };
+  }
+  if (itemType === "image_view" || /(?:image view|view image)/i.test(rawLabel)) {
+    return {
+      title: "Viewing image",
+      ...(detail ? { detail: truncateInlinePreview(detail) } : {}),
+      coordination: false,
+    };
   }
   if (/(?:read file|read files)/i.test(rawLabel)) {
-    return "Reading files";
+    const fileDetail = composerActivityFileDetail(payload, detail);
+    return {
+      title: "Reading files",
+      ...(fileDetail ? { detail: fileDetail } : {}),
+      coordination: false,
+    };
   }
   if (/(?:glob|grep|search files?|find files?)/i.test(rawLabel)) {
-    return "Searching files";
+    return {
+      title: "Searching files",
+      ...(detail ? { detail: truncateInlinePreview(detail) } : {}),
+      coordination: false,
+    };
   }
-  if (/(?:apply patch|file change|edit files?)/i.test(rawLabel)) {
-    return "Editing files";
-  }
-  if (/(?:web search|search the web)/i.test(rawLabel)) {
-    return "Searching the web";
-  }
-  if (/(?:command|exec)/i.test(rawLabel)) {
-    return "Running command";
-  }
-  return rawLabel || "Working";
+  return {
+    title: rawLabel || "Working",
+    ...(detail && normalizePreviewForComparison(detail) !== normalizePreviewForComparison(rawLabel)
+      ? { detail: truncateInlinePreview(detail) }
+      : {}),
+    coordination: false,
+  };
 }
 
 function finiteActivityCount(value: unknown): number | null {
@@ -1007,8 +1142,7 @@ export function deriveComposerActivitySummary(
 ): ComposerActivitySummary {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
   let latestTaskProgress: OrchestrationThreadActivity | null = null;
-  let latestToolActivity: OrchestrationThreadActivity | null = null;
-  const toolCallIds = new Set<string>();
+  const latestToolActivityByCall = new Map<string, OrchestrationThreadActivity>();
 
   for (const activity of ordered) {
     if (
@@ -1030,44 +1164,83 @@ export function deriveComposerActivitySummary(
     ) {
       continue;
     }
-    latestToolActivity = activity;
     const payload = asRecord(activity.payload);
-    toolCallIds.add(asTrimmedString(payload?.toolCallId) ?? activity.id);
+    latestToolActivityByCall.set(asTrimmedString(payload?.toolCallId) ?? activity.id, activity);
   }
+
+  const latestToolActivities = [...latestToolActivityByCall.values()].toSorted(
+    compareActivitiesByOrder,
+  );
+  const latestActiveToolActivities = latestToolActivities.filter((activity) => {
+    if (activity.kind === "tool.completed") return false;
+    const status = extractWorkLogToolLifecycleStatus(asRecord(activity.payload));
+    return status !== "completed" && status !== "failed" && status !== "declined";
+  });
+  const latestActiveSpecificTool = latestActiveToolActivities.findLast(
+    (activity) => !composerActivityToolPresentation(activity).coordination,
+  );
+  const latestSpecificTool = latestToolActivities.findLast(
+    (activity) => !composerActivityToolPresentation(activity).coordination,
+  );
+  const latestToolActivity =
+    latestActiveSpecificTool ??
+    latestActiveToolActivities.at(-1) ??
+    latestSpecificTool ??
+    latestToolActivities.at(-1) ??
+    null;
 
   const taskPayload = latestTaskProgress ? asRecord(latestTaskProgress.payload) : null;
   const taskTitle =
     asTrimmedString(taskPayload?.title) ??
     (latestTaskProgress ? asTrimmedString(latestTaskProgress.summary) : null);
-  const toolLabel = latestToolActivity
-    ? composerActivityToolLabel(latestToolActivity)
-    : asTrimmedString(taskPayload?.lastToolName);
+  const toolPresentation = latestToolActivity
+    ? composerActivityToolPresentation(latestToolActivity)
+    : null;
   const explicitProgress =
     composerActivityProgress(latestToolActivity) ?? composerActivityProgress(latestTaskProgress);
   const progressLabel = explicitProgress
     ? `${explicitProgress.current} of ${explicitProgress.total}`
-    : toolCallIds.size > 0
-      ? `${toolCallIds.size} ${toolCallIds.size === 1 ? "action" : "actions"}`
-      : null;
+    : null;
+  const taskTitleIsGeneric =
+    taskTitle !== null &&
+    /^(?:thinking|working|coordinating sub-?agents|waiting for sub-?agents|starting sub-?agents)\.?\.?\.?$/i.test(
+      taskTitle,
+    );
 
-  if (taskTitle) {
+  if (taskTitle && !taskTitleIsGeneric) {
     const taskDetail =
       asTrimmedString(taskPayload?.summary) ?? asTrimmedString(taskPayload?.detail);
-    const detail = toolLabel
-      ? [toolLabel, progressLabel].filter(Boolean).join(" · ")
+    const detail = toolPresentation
+      ? [toolPresentation.title, toolPresentation.detail ?? progressLabel]
+          .filter(Boolean)
+          .join(" · ")
       : taskDetail && taskDetail !== taskTitle
         ? taskDetail
-        : undefined;
+        : (progressLabel ?? undefined);
     return {
       title: taskTitle,
       ...(detail ? { detail } : {}),
     };
   }
 
-  if (toolLabel) {
+  if (toolPresentation) {
     return {
-      title: toolLabel,
-      ...(progressLabel ? { detail: progressLabel } : {}),
+      title: toolPresentation.title,
+      ...(toolPresentation.detail
+        ? { detail: toolPresentation.detail }
+        : progressLabel
+          ? { detail: progressLabel }
+          : {}),
+      ...(toolPresentation.detailKind ? { detailKind: toolPresentation.detailKind } : {}),
+    };
+  }
+
+  if (taskTitle) {
+    const taskDetail =
+      asTrimmedString(taskPayload?.summary) ?? asTrimmedString(taskPayload?.detail);
+    return {
+      title: taskTitle,
+      ...(taskDetail && taskDetail !== taskTitle ? { detail: taskDetail } : {}),
     };
   }
 
@@ -1525,6 +1698,7 @@ export function deriveTimelineEntries(
   messages: ReadonlyArray<ChatMessage>,
   proposedPlans: ReadonlyArray<ProposedPlan>,
   workEntries: ReadonlyArray<WorkLogEntry>,
+  options?: { readonly includeWorkEntries?: boolean },
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -1538,12 +1712,15 @@ export function deriveTimelineEntries(
     createdAt: proposedPlan.createdAt,
     proposedPlan,
   }));
-  const workRows: TimelineEntry[] = workEntries.map((entry) => ({
-    id: entry.id,
-    kind: "work",
-    createdAt: entry.createdAt,
-    entry,
-  }));
+  const workRows: TimelineEntry[] =
+    options?.includeWorkEntries === false
+      ? []
+      : workEntries.map((entry) => ({
+          id: entry.id,
+          kind: "work",
+          createdAt: entry.createdAt,
+          entry,
+        }));
   return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );

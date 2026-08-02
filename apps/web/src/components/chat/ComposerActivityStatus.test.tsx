@@ -38,6 +38,24 @@ describe("ComposerActivityStatus", () => {
     expect(markup).not.toContain("thinking-orb-shimmer");
   });
 
+  it("renders command details as compact monospace activity", () => {
+    const markup = renderToStaticMarkup(
+      <ComposerActivityStatus
+        activity={{
+          title: "Searching files",
+          detail: 'rg -n "deriveTimelineEntries" apps/web/src',
+          detailKind: "command",
+        }}
+        activeSubagentCount={0}
+        theme="dark"
+      />,
+    );
+
+    expect(markup).toContain("Searching files");
+    expect(markup).toContain("font-mono");
+    expect(markup).toContain("deriveTimelineEntries");
+  });
+
   it("shows a singular live sub-agent count", () => {
     const markup = renderToStaticMarkup(
       <ComposerActivityStatus

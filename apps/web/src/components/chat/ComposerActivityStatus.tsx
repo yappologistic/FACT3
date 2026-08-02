@@ -6,6 +6,7 @@ export const ComposerActivityStatus = memo(function ComposerActivityStatus(props
   readonly activity: {
     readonly title: string;
     readonly detail?: string;
+    readonly detailKind?: "command";
   };
   readonly activeSubagentCount: number;
   readonly theme: "light" | "dark";
@@ -42,7 +43,7 @@ export const ComposerActivityStatus = memo(function ComposerActivityStatus(props
           </span>
           {props.activity.detail ? (
             <span
-              className="composer-activity-copy-detail block truncate text-[12px] text-muted-foreground"
+              className={`composer-activity-copy-detail block truncate text-[12px] text-muted-foreground${props.activity.detailKind === "command" ? " font-mono" : ""}`}
               key={props.activity.detail}
             >
               {props.activity.detail}

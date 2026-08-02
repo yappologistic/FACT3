@@ -83,7 +83,6 @@ import {
   deriveActivePlanState,
   findSidebarProposedPlan,
   findLatestProposedPlan,
-  deriveWorkLogEntries,
   hasActionableProposedPlan,
   isLatestTurnSettled,
 } from "../session-logic";
@@ -2046,7 +2045,6 @@ function ChatViewContent(props: ChatViewProps) {
     () => deriveComposerActivitySummary(threadActivities, activeActivityTurnId),
     [activeActivityTurnId, threadActivities],
   );
-  const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities]);
   const pendingApprovals = useMemo(
     () => derivePendingApprovals(threadActivities),
     [threadActivities],
@@ -2371,8 +2369,11 @@ function ChatViewContent(props: ChatViewProps) {
   }, [attachmentPreviewHandoffByMessageId, displayServerMessages, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      // Live tool activity belongs to the composer pill; keep the conversation timeline prose-only.
+      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], [], {
+        includeWorkEntries: false,
+      }),
+    [activeThread?.proposedPlans, timelineMessages],
   );
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null);
   const draftHeroDockRequested =
