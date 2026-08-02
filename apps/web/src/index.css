@@ -257,12 +257,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   animation: activity-panel-row-detail-enter 150ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-/* Live collaboration count: static gradient avatars keep the reference's
-   overlapping-orb language without adding more continuously repainting
-   canvases. Only mount/count changes animate. */
+/* Live collaboration count: generated avatar textures provide distinct
+   organic geometry. Their tiny inner images only move via compositor-safe
+   transforms, while the surrounding thinking orb remains untouched. */
 .subagent-activity-indicator {
   animation: subagent-activity-enter 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
-  row-gap: 2px;
 }
 
 .subagent-activity-stack {
@@ -286,27 +285,74 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 }
 
 .subagent-activity-orb {
+  position: relative;
   display: block;
   flex: none;
+  overflow: hidden;
+  background: color-mix(in oklab, var(--foreground) 12%, var(--background));
   animation: subagent-activity-orb-enter 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
-.subagent-activity-orb[data-orb-index="0"] {
-  background:
-    radial-gradient(circle at 28% 24%, rgb(226 245 255) 0 16%, transparent 48%),
-    linear-gradient(145deg, rgb(117 214 255), rgb(128 105 255));
+.subagent-activity-orb-image {
+  position: absolute;
+  inset: -18%;
+  width: 136%;
+  height: 136%;
+  max-width: none;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
 }
 
-.subagent-activity-orb[data-orb-index="1"] {
-  background:
-    radial-gradient(circle at 28% 24%, rgb(225 255 235) 0 16%, transparent 48%),
-    linear-gradient(145deg, rgb(127 234 171), rgb(47 191 203));
+.subagent-activity-orb[data-animated="true"] .subagent-activity-orb-image {
+  will-change: transform;
 }
 
-.subagent-activity-orb[data-orb-index="2"] {
-  background:
-    radial-gradient(circle at 28% 24%, rgb(247 225 255) 0 16%, transparent 48%),
-    linear-gradient(145deg, rgb(200 128 255), rgb(238 78 139));
+.subagent-activity-orb[data-orb-index="0"] .subagent-activity-orb-image {
+  animation: subagent-iridescent-plume 5.4s ease-in-out infinite alternate;
+}
+
+.subagent-activity-orb[data-orb-index="1"] .subagent-activity-orb-image {
+  animation: subagent-iridescent-islands 6.3s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite
+    alternate;
+}
+
+.subagent-activity-orb[data-orb-index="2"] .subagent-activity-orb-image {
+  animation: subagent-iridescent-ribbon 4.8s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+}
+
+.subagent-activity-orb[data-orb-index="3"] .subagent-activity-orb-image {
+  animation: subagent-iridescent-vortex 6.8s ease-in-out infinite alternate;
+}
+
+.subagent-activity-orb[data-orb-index="4"] .subagent-activity-orb-image {
+  animation: subagent-iridescent-cells 5.8s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite alternate;
+}
+
+.subagent-activity-orb[data-orb-index="5"] .subagent-activity-orb-image {
+  transform-origin: 86% 86%;
+  animation: subagent-iridescent-fan 6.4s ease-in-out infinite alternate;
+}
+
+.subagent-activity-orb[data-orb-index="6"] .subagent-activity-orb-image {
+  animation: subagent-iridescent-contours 5.6s ease-in-out infinite alternate;
+}
+
+.subagent-activity-orb[data-orb-index="7"] .subagent-activity-orb-image {
+  animation: subagent-iridescent-eclipse 7.2s cubic-bezier(0.37, 0, 0.63, 1) infinite alternate;
+}
+
+.subagent-activity-orb[data-orb-index="8"] .subagent-activity-orb-image {
+  animation: subagent-iridescent-petals 6.1s ease-in-out infinite alternate;
+}
+
+.subagent-activity-orb[data-orb-index="9"] .subagent-activity-orb-image {
+  animation: subagent-iridescent-prism 5.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite alternate;
+}
+
+.subagent-activity-orb[data-animated="false"] .subagent-activity-orb-image {
+  animation: none;
+  transform: scale(1.08);
 }
 
 .subagent-activity-count {
@@ -356,6 +402,96 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   to {
     opacity: 1;
     transform: scale(1);
+  }
+}
+
+@keyframes subagent-iridescent-plume {
+  from {
+    transform: translate3d(-4%, 5%, 0) rotate(-3deg) scale(1.08);
+  }
+  to {
+    transform: translate3d(5%, -5%, 0) rotate(4deg) scale(1.16);
+  }
+}
+
+@keyframes subagent-iridescent-islands {
+  from {
+    transform: translate3d(5%, -4%, 0) rotate(3deg) scale(1.08);
+  }
+  to {
+    transform: translate3d(-5%, 5%, 0) rotate(-5deg) scale(1.16);
+  }
+}
+
+@keyframes subagent-iridescent-ribbon {
+  from {
+    transform: translate3d(-5%, -4%, 0) rotate(-4deg) scale(1.08);
+  }
+  to {
+    transform: translate3d(5%, 4%, 0) rotate(5deg) scale(1.16);
+  }
+}
+
+@keyframes subagent-iridescent-vortex {
+  from {
+    transform: translate3d(-3%, 2%, 0) rotate(-5deg) scale(1.08);
+  }
+  to {
+    transform: translate3d(3%, -2%, 0) rotate(7deg) scale(1.15);
+  }
+}
+
+@keyframes subagent-iridescent-cells {
+  from {
+    transform: translate3d(-5%, -3%, 0) scale(1.08);
+  }
+  to {
+    transform: translate3d(5%, 4%, 0) scale(1.15);
+  }
+}
+
+@keyframes subagent-iridescent-fan {
+  from {
+    transform: translate3d(-2%, 2%, 0) rotate(-4deg) scale(1.08);
+  }
+  to {
+    transform: translate3d(3%, -3%, 0) rotate(5deg) scale(1.14);
+  }
+}
+
+@keyframes subagent-iridescent-contours {
+  from {
+    transform: translate3d(3%, -3%, 0) rotate(2deg) scale(1.08);
+  }
+  to {
+    transform: translate3d(-3%, 3%, 0) rotate(-3deg) scale(1.16);
+  }
+}
+
+@keyframes subagent-iridescent-eclipse {
+  from {
+    transform: translate3d(-5%, 1%, 0) scale(1.08);
+  }
+  to {
+    transform: translate3d(5%, -1%, 0) scale(1.14);
+  }
+}
+
+@keyframes subagent-iridescent-petals {
+  from {
+    transform: translate3d(-2%, 3%, 0) rotate(-4deg) scale(1.08);
+  }
+  to {
+    transform: translate3d(2%, -3%, 0) rotate(5deg) scale(1.15);
+  }
+}
+
+@keyframes subagent-iridescent-prism {
+  from {
+    transform: translate3d(4%, -4%, 0) rotate(2deg) scale(1.08);
+  }
+  to {
+    transform: translate3d(-4%, 4%, 0) rotate(-2deg) scale(1.16);
   }
 }
 
@@ -411,6 +547,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   .activity-panel-row-detail,
   .subagent-activity-indicator,
   .subagent-activity-orb,
+  .subagent-activity-orb-image,
   .subagent-activity-count {
     animation: none;
   }

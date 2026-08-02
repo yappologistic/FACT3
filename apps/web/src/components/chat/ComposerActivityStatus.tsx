@@ -13,7 +13,7 @@ import { ThinkingOrb } from "thinking-orbs";
 import { cn } from "~/lib/utils";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { SubagentActivityIndicator } from "./SubagentActivityIndicator";
+import { SubagentActivityIndicator, SubagentAvatar } from "./SubagentActivityIndicator";
 import {
   formatComposerToolData,
   type ComposerActivityDetails,
@@ -171,7 +171,8 @@ const ToolActivityRow = memo(function ToolActivityRow(props: {
   );
 });
 
-const SubagentActivityRow = memo(function SubagentActivityRow(props: {
+export const SubagentActivityRow = memo(function SubagentActivityRow(props: {
+  readonly avatarIndex: number;
   readonly item: ComposerSubagentActivityItem;
   readonly theme: "light" | "dark";
 }) {
@@ -199,6 +200,8 @@ const SubagentActivityRow = memo(function SubagentActivityRow(props: {
             state="composing"
             theme={props.theme}
           />
+        ) : props.item.status === "completed" ? (
+          <SubagentAvatar index={props.avatarIndex} />
         ) : (
           <StaticStatusIcon status={props.item.status} />
         )
@@ -368,8 +371,13 @@ function ComposerActivityPanel(props: {
           ) : null}
           {section === "subagents" ? (
             props.details.subagents.length > 0 ? (
-              props.details.subagents.map((item) => (
-                <SubagentActivityRow item={item} key={item.id} theme={props.theme} />
+              props.details.subagents.map((item, index) => (
+                <SubagentActivityRow
+                  avatarIndex={index}
+                  item={item}
+                  key={item.id}
+                  theme={props.theme}
+                />
               ))
             ) : (
               <EmptyActivitySection label="Sub-agents" />
@@ -468,7 +476,7 @@ export const ComposerActivityStatus = memo(function ComposerActivityStatus(props
                   </span>
                 ) : null}
               </span>
-              <SubagentActivityIndicator active={props.isActive} count={displayedSubagentCount} />
+              <SubagentActivityIndicator count={displayedSubagentCount} />
             </button>
           }
         />

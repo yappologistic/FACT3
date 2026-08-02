@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
-import { ComposerActivityStatus } from "./ComposerActivityStatus";
+import { ComposerActivityStatus, SubagentActivityRow } from "./ComposerActivityStatus";
+import { SubagentAvatar } from "./SubagentActivityIndicator";
 import type { ComposerActivityDetails } from "./composerActivityDetails";
 
 const EMPTY_DETAILS: ComposerActivityDetails = {
@@ -47,8 +48,58 @@ describe("ComposerActivityStatus", () => {
     expect(markup).toContain("Reading files · 3 of 7");
     expect(markup).toContain("2 sub-agents running");
     expect(markup).toContain('data-subagent-count="2"');
+    expect(markup).toContain("/subagent-avatars/plume.webp");
+    expect(markup).toContain("/subagent-avatars/islands.webp");
+    expect(markup).toContain('data-animated="true"');
     expect(markup).toContain("width:32px");
     expect(markup).not.toContain("thinking-orb-shimmer");
+  });
+
+  it("uses the assigned iridescent avatar for a completed sub-agent", () => {
+    const markup = renderToStaticMarkup(
+      <SubagentActivityRow
+        avatarIndex={2}
+        item={{
+          id: "agent-3",
+          name: "Desktop review",
+          status: "completed",
+          createdAt: "2026-08-02T00:00:00.000Z",
+          result: "Review complete",
+        }}
+        theme="dark"
+      />,
+    );
+
+    expect(markup).toContain("/subagent-avatars/ribbon.webp");
+    expect(markup).toContain('data-animated="true"');
+    expect(markup).not.toContain("lucide-check");
+  });
+
+  it("provides ten distinct animated sub-agent identities", () => {
+    const expectedTextures = [
+      "plume",
+      "islands",
+      "ribbon",
+      "vortex",
+      "cells",
+      "fan",
+      "contours",
+      "eclipse",
+      "petals",
+      "prism",
+    ];
+    const markup = renderToStaticMarkup(
+      <div>
+        {expectedTextures.map((_, index) => (
+          <SubagentAvatar index={index} key={index} />
+        ))}
+      </div>,
+    );
+
+    for (const texture of expectedTextures) {
+      expect(markup).toContain(`/subagent-avatars/${texture}.webp`);
+    }
+    expect(markup.match(/data-animated="true"/g)).toHaveLength(10);
   });
 
   it("renders command details as compact monospace activity", () => {
