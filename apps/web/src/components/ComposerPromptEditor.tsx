@@ -71,11 +71,10 @@ import {
 import { cn, isMacPlatform } from "~/lib/utils";
 import { basenameOfPath } from "~/pierre-icons";
 import {
-  COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
   COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
   COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME,
-  SKILL_CHIP_ICON_SVG,
 } from "./composerInlineChip";
+import { SkillChipIcon } from "./SkillChipIcon";
 import { FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
 import { ComposerPendingTerminalContextChip } from "./chat/ComposerPendingTerminalContexts";
 import { formatProviderSkillDisplayName } from "~/providerSkillPresentation";
@@ -243,7 +242,11 @@ function skillMetadataByName(
   );
 }
 
-function ComposerSkillDecorator(props: { skillLabel: string; skillDescription: string | null }) {
+function ComposerSkillDecorator(props: {
+  skillName: string;
+  skillLabel: string;
+  skillDescription: string | null;
+}) {
   const chip = (
     <span
       className={COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME}
@@ -251,11 +254,7 @@ function ComposerSkillDecorator(props: { skillLabel: string; skillDescription: s
       spellCheck={false}
       data-composer-skill-chip="true"
     >
-      <span
-        aria-hidden="true"
-        className={COMPOSER_INLINE_CHIP_ICON_CLASS_NAME}
-        dangerouslySetInnerHTML={{ __html: SKILL_CHIP_ICON_SVG }}
-      />
+      <SkillChipIcon skillLabel={props.skillLabel} skillName={props.skillName} />
       <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{props.skillLabel}</span>
     </span>
   );
@@ -345,6 +344,7 @@ class ComposerSkillNode extends DecoratorNode<React.ReactElement> {
   override decorate(): React.ReactElement {
     return (
       <ComposerSkillDecorator
+        skillName={this.__skillName}
         skillLabel={this.__skillLabel}
         skillDescription={this.__skillDescription}
       />

@@ -11,10 +11,16 @@ export const CHAT_INLINE_CHIP_LABEL_CLASS_NAME = "truncate leading-tight";
 
 export const COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME = `${CHAT_INLINE_CHIP_LABEL_CLASS_NAME} select-none`;
 
-export const COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME =
-  "inline-flex max-w-full select-none items-center gap-1 rounded-md border border-fuchsia-500/25 bg-fuchsia-500/12 px-1.5 py-px font-medium text-[12px] leading-[1.1] text-fuchsia-700 align-middle dark:text-fuchsia-300";
+const CHAT_INLINE_METADATA_CHIP_CLASS_NAME =
+  "inline-flex min-h-6 max-w-full items-center gap-1.5 rounded-[9px] border border-border/60 bg-foreground/[0.045] px-1.5 py-0.5 font-normal text-[12px] leading-[1.1] text-foreground/80 align-middle transition-colors hover:bg-foreground/[0.065]";
 
-export const SKILL_CHIP_ICON_SVG = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.85" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>`;
+const COMPOSER_INLINE_METADATA_CHIP_CLASS_NAME = `${CHAT_INLINE_METADATA_CHIP_CLASS_NAME} select-none`;
+
+export const CHAT_INLINE_FILE_TAG_CHIP_CLASS_NAME = CHAT_INLINE_METADATA_CHIP_CLASS_NAME;
+export const COMPOSER_INLINE_FILE_TAG_CHIP_CLASS_NAME = COMPOSER_INLINE_METADATA_CHIP_CLASS_NAME;
+
+export const CHAT_INLINE_SKILL_CHIP_CLASS_NAME = CHAT_INLINE_METADATA_CHIP_CLASS_NAME;
+export const COMPOSER_INLINE_SKILL_CHIP_CLASS_NAME = COMPOSER_INLINE_METADATA_CHIP_CLASS_NAME;
 
 export const COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME =
   "ml-0.5 inline-flex size-3.5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/72 transition-colors hover:bg-foreground/6 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
