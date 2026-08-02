@@ -644,9 +644,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     align-items: center;
   }
 
-  /* Fade rows themselves as they pass beneath the top chrome. A mask remains
-     visible even when the header and timeline share the same background. */
-  .chat-timeline-scroll-fade,
+  /* Fade settings rows themselves as they pass beneath the top chrome. A mask
+     remains visible even when the header and page share a background. */
   .settings-page-scroll-fade {
     --topbar-scroll-fade-height: 2.5rem;
     -webkit-mask-image:
@@ -685,6 +684,58 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
       100% var(--topbar-scroll-fade-height),
       100% calc(100% - var(--topbar-scroll-fade-height)),
       var(--app-scrollbar-width) 100%;
+  }
+
+  /* Direction-aware chat overflow hints. The virtual list updates data
+     attributes on its stable host, so scrolling never schedules React work. */
+  .chat-timeline-scroll-shadow {
+    --chat-scroll-shadow-size: 2.5rem;
+  }
+
+  .chat-timeline-scroll-shadow-host:is([data-top-scroll], [data-bottom-scroll])
+    .chat-timeline-scroll-shadow {
+    -webkit-mask-image: var(--chat-scroll-shadow-mask), linear-gradient(black, black);
+    -webkit-mask-position: center, right;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-size:
+      100% 100%,
+      var(--app-scrollbar-width) 100%;
+    mask-image: var(--chat-scroll-shadow-mask), linear-gradient(black, black);
+    mask-position: center, right;
+    mask-repeat: no-repeat;
+    mask-size:
+      100% 100%,
+      var(--app-scrollbar-width) 100%;
+  }
+
+  .chat-timeline-scroll-shadow-host[data-top-scroll]:not([data-bottom-scroll])
+    .chat-timeline-scroll-shadow {
+    --chat-scroll-shadow-mask: linear-gradient(
+      to bottom,
+      transparent 0,
+      black var(--chat-scroll-shadow-size),
+      black 100%
+    );
+  }
+
+  .chat-timeline-scroll-shadow-host[data-bottom-scroll]:not([data-top-scroll])
+    .chat-timeline-scroll-shadow {
+    --chat-scroll-shadow-mask: linear-gradient(
+      to bottom,
+      black 0,
+      black calc(100% - var(--chat-scroll-shadow-size)),
+      transparent 100%
+    );
+  }
+
+  .chat-timeline-scroll-shadow-host[data-top-bottom-scroll] .chat-timeline-scroll-shadow {
+    --chat-scroll-shadow-mask: linear-gradient(
+      to bottom,
+      transparent 0,
+      black var(--chat-scroll-shadow-size),
+      black calc(100% - var(--chat-scroll-shadow-size)),
+      transparent 100%
+    );
   }
 
   .workspace-titlebar-controls {
@@ -1093,9 +1144,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   }
 
   @media (min-width: 40rem) {
-    .chat-timeline-scroll-fade,
     .settings-page-scroll-fade {
       --topbar-scroll-fade-height: 3rem;
+    }
+
+    .chat-timeline-scroll-shadow {
+      --chat-scroll-shadow-size: 3rem;
     }
 
     .chat-composer-horizontal-inset {

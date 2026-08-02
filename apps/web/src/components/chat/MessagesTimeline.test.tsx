@@ -280,7 +280,7 @@ describe("MessagesTimeline", () => {
     expect(completedMarkup).toContain("<strong>");
   });
 
-  it("uses the larger leading inset only when the top fade is enabled", () => {
+  it("keeps scroll shadows mounted and adds the larger top inset when enabled", () => {
     const timelineEntries = [buildUserTimelineEntry("Hello")];
 
     const compactMarkup = renderToStaticMarkup(
@@ -291,9 +291,11 @@ describe("MessagesTimeline", () => {
     );
 
     expect(compactMarkup).toContain('class="h-3 sm:h-4"');
-    expect(compactMarkup).not.toContain("chat-timeline-scroll-fade");
+    expect(compactMarkup).toContain("chat-timeline-scroll-shadow-host");
+    expect(compactMarkup).toContain("chat-timeline-scroll-shadow");
     expect(fadedMarkup).toContain('class="h-10 sm:h-12"');
-    expect(fadedMarkup).toContain("chat-timeline-scroll-fade");
+    expect(fadedMarkup).toContain("chat-timeline-scroll-shadow-host");
+    expect(fadedMarkup).toContain("chat-timeline-scroll-shadow");
   });
 
   it("keeps assistant changed-files headers sticky below the thread header", () => {

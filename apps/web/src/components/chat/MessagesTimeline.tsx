@@ -77,6 +77,7 @@ import {
   resolveTimelineMinimapIndexFromPointer,
   resolveTimelineMinimapInteractiveWidth,
   resolveTimelineMinimapTopPercent,
+  resolveTimelineScrollShadowVisibility,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,
@@ -222,6 +223,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const [expandedTurnIds, setExpandedTurnIds] = useState<ReadonlySet<TurnId>>(new Set());
   const [expandedWorkGroupIds, setExpandedWorkGroupIds] = useState<ReadonlySet<string>>(new Set());
   const [minimapStripMap] = useState(() => new Map<string, HTMLSpanElement>());
+  const scrollShadowVisibilityRef = useRef(-1);
 
   const onToggleTurnFold = useCallback((turnId: TurnId) => {
     setExpandedTurnIds((existing) => {
@@ -358,6 +360,18 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     if (isAtEnd !== undefined) {
       onIsAtEndChange(isAtEnd);
     }
+    const shadowVisibility = resolveTimelineScrollShadowVisibility(state);
+    const nextShadowVisibility =
+      (topFadeEnabled && shadowVisibility.top ? 1 : 0) | (shadowVisibility.bottom ? 2 : 0);
+    if (timelineViewportElement && scrollShadowVisibilityRef.current !== nextShadowVisibility) {
+      timelineViewportElement.toggleAttribute("data-top-scroll", (nextShadowVisibility & 1) !== 0);
+      timelineViewportElement.toggleAttribute(
+        "data-bottom-scroll",
+        (nextShadowVisibility & 2) !== 0,
+      );
+      timelineViewportElement.toggleAttribute("data-top-bottom-scroll", nextShadowVisibility === 3);
+      scrollShadowVisibilityRef.current = nextShadowVisibility;
+    }
     if (!state || minimapItems.length === 0) {
       return;
     }
@@ -380,7 +394,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
 
       strip.dataset.inView = inView ? "true" : "false";
     }
-  }, [listRef, minimapItems, minimapStripMap, onIsAtEndChange]);
+  }, [
+    listRef,
+    minimapItems,
+    minimapStripMap,
+    onIsAtEndChange,
+    timelineViewportElement,
+    topFadeEnabled,
+  ]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(handleScroll);
@@ -480,7 +501,10 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   return (
     <TimelineRowCtx value={sharedState}>
       <TimelineRowActivityCtx value={activityState}>
-        <div ref={setTimelineViewportElement} className="relative h-full min-h-0">
+        <div
+          ref={setTimelineViewportElement}
+          className="chat-timeline-scroll-shadow-host relative h-full min-h-0"
+        >
           <LegendList<MessagesTimelineRow>
             ref={listRef}
             data={rows}
@@ -509,8 +533,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
             }}
             onScroll={handleScroll}
             className={cn(
-              "scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
-              topFadeEnabled && "chat-timeline-scroll-fade",
+              "chat-timeline-scroll-shadow scrollbar-gutter-both h-full min-h-0 overflow-x-hidden overscroll-y-contain px-3 [overflow-anchor:none] sm:px-5",
             )}
             ListHeaderComponent={topFadeEnabled ? TIMELINE_LIST_FADE_HEADER : TIMELINE_LIST_HEADER}
             ListFooterComponent={TIMELINE_LIST_FOOTER}

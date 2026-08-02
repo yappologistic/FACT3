@@ -5,7 +5,40 @@ import {
   deriveMessagesTimelineRows,
   normalizeCompactToolLabel,
   resolveAssistantMessageCopyState,
+  resolveTimelineScrollShadowVisibility,
 } from "./MessagesTimeline.logic";
+
+describe("resolveTimelineScrollShadowVisibility", () => {
+  it("shows only the directions that still contain overflow", () => {
+    expect(
+      resolveTimelineScrollShadowVisibility({ contentLength: 1000, scrollLength: 400, scroll: 0 }),
+    ).toEqual({ top: false, bottom: true });
+    expect(
+      resolveTimelineScrollShadowVisibility({
+        contentLength: 1000,
+        scrollLength: 400,
+        scroll: 300,
+      }),
+    ).toEqual({ top: true, bottom: true });
+    expect(
+      resolveTimelineScrollShadowVisibility({
+        contentLength: 1000,
+        scrollLength: 400,
+        scroll: 600,
+      }),
+    ).toEqual({ top: true, bottom: false });
+  });
+
+  it("does not show shadows when the timeline does not overflow", () => {
+    expect(
+      resolveTimelineScrollShadowVisibility({ contentLength: 400, scrollLength: 400, scroll: 0 }),
+    ).toEqual({ top: false, bottom: false });
+    expect(resolveTimelineScrollShadowVisibility(undefined)).toEqual({
+      top: false,
+      bottom: false,
+    });
+  });
+});
 
 describe("computeMessageDurationStart", () => {
   it("returns message createdAt when there is no preceding user message", () => {

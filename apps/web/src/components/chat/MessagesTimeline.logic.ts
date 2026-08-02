@@ -21,8 +21,34 @@ export interface TimelineEndState {
   readonly isNearEnd?: boolean;
 }
 
+export interface TimelineScrollShadowState {
+  readonly contentLength?: number;
+  readonly scroll?: number;
+  readonly scrollLength?: number;
+}
+
+export interface TimelineScrollShadowVisibility {
+  readonly bottom: boolean;
+  readonly top: boolean;
+}
+
 export function resolveTimelineIsAtEnd(state: TimelineEndState | undefined): boolean | undefined {
   return state?.isNearEnd ?? state?.isAtEnd;
+}
+
+export function resolveTimelineScrollShadowVisibility(
+  state: TimelineScrollShadowState | undefined,
+): TimelineScrollShadowVisibility {
+  const contentLength = Math.max(0, state?.contentLength ?? 0);
+  const scrollLength = Math.max(0, state?.scrollLength ?? 0);
+  const scroll = Math.max(0, state?.scroll ?? 0);
+  const edgeOffset = 1;
+  const hasOverflow = contentLength - scrollLength > edgeOffset;
+
+  return {
+    top: hasOverflow && scroll > edgeOffset,
+    bottom: hasOverflow && scroll + scrollLength < contentLength - edgeOffset,
+  };
 }
 
 export function resolveTimelineMinimapHeightStyle(itemCount: number): string {
