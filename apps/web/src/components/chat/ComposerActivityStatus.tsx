@@ -77,6 +77,7 @@ function ActivityRowShell(props: {
   readonly onToggle?: () => void;
   readonly children?: ReactNode;
 }) {
+  const statusLabel = statusCopy(props.status);
   const content = (
     <>
       <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-foreground/[0.055]">
@@ -97,9 +98,13 @@ function ActivityRowShell(props: {
           </span>
         ) : null}
       </span>
-      <span className={cn("shrink-0 text-[10px]", statusTextClass(props.status))}>
-        {statusCopy(props.status)}
-      </span>
+      {props.status === "completed" ? (
+        <span className="sr-only">{statusLabel}</span>
+      ) : (
+        <span className={cn("shrink-0 text-[10px]", statusTextClass(props.status))}>
+          {statusLabel}
+        </span>
+      )}
       {props.expandable ? (
         <ChevronRightIcon
           aria-hidden
