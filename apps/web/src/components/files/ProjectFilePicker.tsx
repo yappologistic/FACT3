@@ -146,6 +146,7 @@ function OpenProjectFilePicker(props: ProjectFilePickerProps & { target: ActiveP
           props.setOpen(false);
           void item.run();
         }}
+        query={query}
         emptyStateMessage={emptyStateMessage}
       />
     </CommandPaletteContent>

@@ -608,6 +608,12 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     backdrop-filter: blur(4px);
   }
 
+  .command-palette-backdrop {
+    background: color-mix(in srgb, var(--background) 54%, transparent);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
   .dropdown-glass {
     /*
      * Elevated glass needs a denser tint than broad ambient surfaces. Nesting
@@ -652,6 +658,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
   .dark .dialog-backdrop {
     background: color-mix(in srgb, var(--background) 64%, transparent);
+  }
+
+  .dark .command-palette-backdrop {
+    background: color-mix(in srgb, var(--background) 58%, transparent);
   }
 
   .glass-opacity-slider {

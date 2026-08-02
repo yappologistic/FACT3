@@ -4,14 +4,15 @@ import {
   THREAD_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
 import type { SidebarThreadSortOrder } from "@t3tools/contracts/settings";
-import * as Arr from "effect/Array";
-import * as Result from "effect/Result";
 import { type ReactNode } from "react";
 import { sortThreads } from "../lib/threadSort";
 import { formatRelativeTimeLabel } from "../timestampFormat";
 import { type Project, type SidebarThreadSummary, type Thread } from "../types";
 
-export const RECENT_THREAD_LIMIT = 12;
+export const RECENT_THREAD_LIMIT = 5;
+export const SEARCH_RESULT_LIMIT = 12;
+export const SEARCH_GROUP_RESULT_LIMIT = 5;
+export const SCOPED_RESULT_LIMIT = 24;
 export const ITEM_ICON_CLASS = "size-4 text-muted-foreground/80";
 export const ADDON_ICON_CLASS = "size-4";
 
@@ -228,25 +229,70 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   });
 }
 
+export function buildRecentThreadItems(
+  items: ReadonlyArray<CommandPaletteActionItem>,
+  activeThreadId: Thread["id"] | undefined,
+): CommandPaletteActionItem[] {
+  const activeValue = activeThreadId ? `thread:${activeThreadId}` : null;
+  return items.filter((item) => item.value !== activeValue).slice(0, RECENT_THREAD_LIMIT);
+}
+
 function rankSearchFieldMatch(field: string, normalizedQuery: string): number {
   const normalizedField = normalizeSearchText(field);
-  if (normalizedField.length === 0 || !normalizedField.includes(normalizedQuery)) {
+  if (normalizedField.length === 0 || normalizedQuery.length === 0) {
     return Number.NEGATIVE_INFINITY;
   }
   if (normalizedField === normalizedQuery) {
-    return 3;
+    return 500;
   }
   if (normalizedField.startsWith(normalizedQuery)) {
-    return 2;
+    return 420;
   }
-  return 1;
+  if (normalizedField.includes(normalizedQuery)) {
+    return 320;
+  }
+
+  const fieldWords = normalizedField.split(" ");
+  const queryWords = normalizedQuery.split(" ");
+  let score = 0;
+  for (const queryWord of queryWords) {
+    if (queryWord.length < 2) return Number.NEGATIVE_INFINITY;
+    let bestWordScore = Number.NEGATIVE_INFINITY;
+    for (const fieldWord of fieldWords) {
+      let cursor = 0;
+      let previousMatchIndex = -2;
+      let wordScore = 0;
+      for (const character of queryWord) {
+        const matchIndex = fieldWord.indexOf(character, cursor);
+        if (matchIndex === -1) {
+          wordScore = Number.NEGATIVE_INFINITY;
+          break;
+        }
+        if (matchIndex === 0) wordScore += 8;
+        if (matchIndex === previousMatchIndex + 1) wordScore += 5;
+        wordScore -= Math.min(matchIndex - cursor, 4);
+        previousMatchIndex = matchIndex;
+        cursor = matchIndex + 1;
+      }
+      bestWordScore = Math.max(bestWordScore, wordScore);
+    }
+    if (bestWordScore === Number.NEGATIVE_INFINITY) {
+      return Number.NEGATIVE_INFINITY;
+    }
+    score += bestWordScore;
+  }
+  return 100 + score;
 }
 
 function rankCommandPaletteItemMatch(
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem,
   normalizedQuery: string,
 ): number {
-  const terms = item.searchTerms.filter((term) => term.length > 0);
+  const terms = [
+    typeof item.title === "string" ? item.title : "",
+    typeof item.description === "string" ? item.description : "",
+    ...item.searchTerms,
+  ].filter((term) => term.length > 0);
   if (terms.length === 0) {
     return 0;
   }
@@ -254,40 +300,136 @@ function rankCommandPaletteItemMatch(
   for (const [index, field] of terms.entries()) {
     const fieldRank = rankSearchFieldMatch(field, normalizedQuery);
     if (fieldRank !== Number.NEGATIVE_INFINITY) {
-      return 1_000 - index * 100 + fieldRank;
+      return 4_000 - index * 500 + fieldRank;
     }
   }
 
-  return 0;
+  return Number.NEGATIVE_INFINITY;
+}
+
+export type CommandPaletteSearchScope = "all" | "actions" | "projects" | "threads";
+
+export function parseCommandPaletteQuery(query: string): {
+  readonly query: string;
+  readonly scope: CommandPaletteSearchScope;
+} {
+  const trimmedStart = query.trimStart();
+  const prefix = trimmedStart[0];
+  const scope =
+    prefix === ">" ? "actions" : prefix === "@" ? "projects" : prefix === "#" ? "threads" : "all";
+  return {
+    scope,
+    query: scope === "all" ? query : trimmedStart.slice(1).trimStart(),
+  };
+}
+
+function rankSearchGroups(
+  groups: ReadonlyArray<CommandPaletteGroup>,
+  normalizedQuery: string,
+  scope: CommandPaletteSearchScope,
+): CommandPaletteGroup[] {
+  const rankedItems = groups
+    .flatMap((group, groupIndex) =>
+      group.items.flatMap((item, itemIndex) => {
+        const rank = rankCommandPaletteItemMatch(item, normalizedQuery);
+        return rank === Number.NEGATIVE_INFINITY
+          ? []
+          : [{ group, groupIndex, item, itemIndex, rank }];
+      }),
+    )
+    .toSorted(
+      (left, right) =>
+        right.rank - left.rank ||
+        left.groupIndex - right.groupIndex ||
+        left.itemIndex - right.itemIndex,
+    );
+
+  const totalLimit = scope === "all" ? SEARCH_RESULT_LIMIT : SCOPED_RESULT_LIMIT;
+  const groupLimit = scope === "all" ? SEARCH_GROUP_RESULT_LIMIT : SCOPED_RESULT_LIMIT;
+  const accepted: typeof rankedItems = [];
+  const countByGroup = new Map<string, number>();
+  for (const candidate of rankedItems) {
+    if (accepted.length >= totalLimit) break;
+    const groupCount = countByGroup.get(candidate.group.value) ?? 0;
+    if (groupCount >= groupLimit) continue;
+    countByGroup.set(candidate.group.value, groupCount + 1);
+    accepted.push(candidate);
+  }
+
+  const outputGroups = new Map<string, CommandPaletteGroup>();
+  for (const candidate of accepted) {
+    const existing = outputGroups.get(candidate.group.value);
+    if (existing) {
+      outputGroups.set(candidate.group.value, {
+        ...existing,
+        items: [...existing.items, candidate.item],
+      });
+      continue;
+    }
+    outputGroups.set(candidate.group.value, {
+      value: candidate.group.value,
+      label: candidate.group.label,
+      items: [candidate.item],
+    });
+  }
+  return [...outputGroups.values()];
 }
 
 export function filterCommandPaletteGroups(input: {
   activeGroups: ReadonlyArray<CommandPaletteGroup>;
+  actionSearchItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
   query: string;
   isInSubmenu: boolean;
   projectSearchItems: ReadonlyArray<CommandPaletteActionItem>;
   threadSearchItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
-  const isActionsFilter = input.query.startsWith(">");
-  const searchQuery = isActionsFilter ? input.query.slice(1) : input.query;
-  const normalizedQuery = normalizeSearchText(searchQuery);
+  const parsedQuery = input.isInSubmenu
+    ? { query: input.query, scope: "all" as const }
+    : parseCommandPaletteQuery(input.query);
+  const normalizedQuery = normalizeSearchText(parsedQuery.query);
 
   if (normalizedQuery.length === 0) {
-    if (isActionsFilter) {
-      return input.activeGroups.filter((group) => group.value === "actions");
+    if (input.isInSubmenu || parsedQuery.scope === "all") {
+      return [...input.activeGroups];
     }
-    return [...input.activeGroups];
+    const items =
+      parsedQuery.scope === "actions"
+        ? input.actionSearchItems.toSorted(
+            (left, right) => Number(Boolean(left.disabled)) - Number(Boolean(right.disabled)),
+          )
+        : parsedQuery.scope === "projects"
+          ? input.projectSearchItems
+          : input.threadSearchItems;
+    const label =
+      parsedQuery.scope === "actions"
+        ? "Actions"
+        : parsedQuery.scope === "projects"
+          ? "Projects"
+          : "Threads";
+    return items.length === 0
+      ? []
+      : [
+          {
+            value: `${parsedQuery.scope}-search`,
+            label,
+            items: items.slice(0, SCOPED_RESULT_LIMIT),
+          },
+        ];
   }
 
-  let baseGroups = [...input.activeGroups];
-  if (isActionsFilter) {
-    baseGroups = baseGroups.filter((group) => group.value === "actions");
-  } else if (!input.isInSubmenu) {
-    baseGroups = baseGroups.filter((group) => group.value !== "recent-threads");
+  if (input.isInSubmenu) {
+    return rankSearchGroups(input.activeGroups, normalizedQuery, "all");
   }
 
-  const searchableGroups = [...baseGroups];
-  if (!input.isInSubmenu && !isActionsFilter) {
+  const searchableGroups: CommandPaletteGroup[] = [];
+  if (parsedQuery.scope === "all" || parsedQuery.scope === "actions") {
+    searchableGroups.push({
+      value: "actions-search",
+      label: "Actions",
+      items: input.actionSearchItems,
+    });
+  }
+  if (parsedQuery.scope === "all" || parsedQuery.scope === "projects") {
     if (input.projectSearchItems.length > 0) {
       searchableGroups.push({
         value: "projects-search",
@@ -295,6 +437,8 @@ export function filterCommandPaletteGroups(input: {
         items: input.projectSearchItems,
       });
     }
+  }
+  if (parsedQuery.scope === "all" || parsedQuery.scope === "threads") {
     if (input.threadSearchItems.length > 0) {
       searchableGroups.push({
         value: "threads-search",
@@ -303,29 +447,17 @@ export function filterCommandPaletteGroups(input: {
       });
     }
   }
+  return rankSearchGroups(searchableGroups, normalizedQuery, parsedQuery.scope);
+}
 
-  return searchableGroups.flatMap((group) => {
-    const items = Arr.filterMap(group.items, (item, index) => {
-      const haystack = normalizeSearchText(item.searchTerms.join(" "));
-      if (!haystack.includes(normalizedQuery)) {
-        return Result.failVoid;
-      }
-
-      return Result.succeed({
-        item,
-        index,
-        rank: rankCommandPaletteItemMatch(item, normalizedQuery),
-      });
-    })
-      .toSorted((left, right) => right.rank - left.rank || left.index - right.index)
-      .map((entry) => entry.item);
-
-    if (items.length === 0) {
-      return [];
-    }
-
-    return [{ value: group.value, label: group.label, items }];
-  });
+export function findCommandPaletteExecutionItem(
+  groups: ReadonlyArray<CommandPaletteGroup>,
+  highlightedValue: string | null,
+): CommandPaletteActionItem | CommandPaletteSubmenuItem | null {
+  const executableItems = groups.flatMap((group) => group.items).filter((item) => !item.disabled);
+  return (
+    executableItems.find((item) => item.value === highlightedValue) ?? executableItems[0] ?? null
+  );
 }
 
 export function buildBrowseGroups(input: {
@@ -381,17 +513,21 @@ export function getCommandPaletteMode(input: {
 }
 
 export function buildRootGroups(input: {
-  actionItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
+  suggestedActionItems: ReadonlyArray<CommandPaletteActionItem | CommandPaletteSubmenuItem>;
   recentThreadItems: ReadonlyArray<CommandPaletteActionItem>;
 }): CommandPaletteGroup[] {
   const groups: CommandPaletteGroup[] = [];
-  if (input.actionItems.length > 0) {
-    groups.push({ value: "actions", label: "Actions", items: input.actionItems });
+  if (input.suggestedActionItems.length > 0) {
+    groups.push({
+      value: "suggested",
+      label: "Suggested",
+      items: input.suggestedActionItems,
+    });
   }
   if (input.recentThreadItems.length > 0) {
     groups.push({
       value: "recent-threads",
-      label: "Recent Threads",
+      label: "Recent threads",
       items: input.recentThreadItems,
     });
   }
@@ -401,7 +537,7 @@ export function buildRootGroups(input: {
 export function getCommandPaletteInputPlaceholder(mode: CommandPaletteMode): string {
   switch (mode) {
     case "root":
-      return "Search commands, projects, and threads...";
+      return "Search threads, projects, or actions...";
     case "root-browse":
       return "Enter project path (e.g. ~/projects/my-app)";
     case "submenu":

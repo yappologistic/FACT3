@@ -65,6 +65,7 @@ import {
 import { ComposerStashBadge } from "./ComposerStashBadge";
 import { ComposerStashMenu } from "./ComposerStashMenu";
 import { compressImageForStash, compressImageToByteLimit } from "../../lib/imageCompression";
+import { onAppCommand } from "../../appCommandBus";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { getTerminalFocusOwner } from "../../lib/terminalFocus";
 import { resolveShortcutCommand } from "../../keybindings";
@@ -2251,6 +2252,25 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsStashMenuOpen(false);
   }, [prompt]);
 
+  const executeStashCommand = useCallback((): boolean => {
+    if (
+      isComposerApprovalState ||
+      pendingUserInputs.length > 0 ||
+      projectSelectionRequired ||
+      activePendingProgress !== null
+    ) {
+      return false;
+    }
+    void stashCurrentPrompt();
+    return true;
+  }, [
+    activePendingProgress,
+    isComposerApprovalState,
+    pendingUserInputs.length,
+    projectSelectionRequired,
+    stashCurrentPrompt,
+  ]);
+
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       const command = resolveShortcutCommand(event, keybindings, {
@@ -2265,29 +2285,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       // even when the composer is in a state that can't stash.
       event.preventDefault();
       event.stopPropagation();
-      if (
-        isCommandPaletteOpen() ||
-        isComposerApprovalState ||
-        pendingUserInputs.length > 0 ||
-        projectSelectionRequired ||
-        activePendingProgress !== null
-      ) {
-        return;
-      }
-      void stashCurrentPrompt();
+      if (isCommandPaletteOpen()) return;
+      executeStashCommand();
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [
-    activePendingProgress,
-    isComposerApprovalState,
-    isComposerModelPickerOpen,
-    keybindings,
-    pendingUserInputs.length,
-    projectSelectionRequired,
-    stashCurrentPrompt,
-    terminalOpen,
-  ]);
+  }, [executeStashCommand, isComposerModelPickerOpen, keybindings, terminalOpen]);
+
+  useEffect(
+    () => onAppCommand((command) => (command === "composer.stash" ? executeStashCommand() : false)),
+    [executeStashCommand],
+  );
 
   // ------------------------------------------------------------------
   // Callbacks: images

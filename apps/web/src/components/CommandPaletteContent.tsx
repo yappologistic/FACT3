@@ -8,6 +8,7 @@ type CommandPaletteContentProps = Omit<ComponentProps<typeof Command>, "children
   readonly children: ReactNode;
   readonly escapeLabel?: ReactNode;
   readonly footerActionLabel?: ReactNode;
+  readonly footerLeading?: ReactNode;
   readonly footerTrailing?: ReactNode;
   readonly inputAccessory?: ReactNode;
   readonly inputProps: ComponentProps<typeof CommandInput>;
@@ -25,6 +26,7 @@ export function CommandPaletteContent({
   children,
   escapeLabel = "Close",
   footerActionLabel,
+  footerLeading,
   footerTrailing,
   inputAccessory,
   inputProps,
@@ -36,13 +38,14 @@ export function CommandPaletteContent({
   return (
     <div className="contents" data-testid={testId}>
       <Command {...commandProps}>
-        <div className="relative">
+        <div className="relative border-border/60 border-b">
           <CommandInput {...inputProps} />
           {inputAccessory}
         </div>
         <CommandPanel className={panelClassName}>{children}</CommandPanel>
         <CommandFooter className="gap-3 max-sm:flex-col max-sm:items-start">
-          <div className="flex items-center gap-3">
+          {footerLeading}
+          <div className="ms-auto flex items-center gap-3 max-sm:ms-0">
             <KbdGroup className="items-center gap-1.5">
               <Kbd>
                 <ArrowUpIcon />
@@ -68,8 +71,8 @@ export function CommandPaletteContent({
               <Kbd>Esc</Kbd>
               <span>{escapeLabel}</span>
             </KbdGroup>
+            {footerTrailing}
           </div>
-          {footerTrailing}
         </CommandFooter>
       </Command>
     </div>

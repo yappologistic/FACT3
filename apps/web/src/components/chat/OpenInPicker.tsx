@@ -1,5 +1,6 @@
 import { EditorId, type EnvironmentId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
 import { memo, useCallback, useEffect, useMemo } from "react";
+import { onAppCommand } from "../../appCommandBus";
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
 import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
@@ -229,32 +230,37 @@ export const OpenInPicker = memo(function OpenInPicker({
     [keybindings],
   );
 
+  const openPreferredEditor = useCallback((): boolean => {
+    if (!enableShortcut || !openInCwd || !preferredEditor) return false;
+    void openInEditorMutation({
+      environmentId,
+      input: {
+        cwd: openInCwd,
+        editor: preferredEditor,
+      },
+    });
+    return true;
+  }, [enableShortcut, environmentId, openInCwd, openInEditorMutation, preferredEditor]);
+
   useEffect(() => {
     if (!enableShortcut) return;
     const handler = (e: globalThis.KeyboardEvent) => {
       if (!isOpenFavoriteEditorShortcut(e, keybindings)) return;
-      if (!openInCwd) return;
-      if (!preferredEditor) return;
+      if (!openPreferredEditor()) return;
 
       e.preventDefault();
-      void openInEditorMutation({
-        environmentId,
-        input: {
-          cwd: openInCwd,
-          editor: preferredEditor,
-        },
-      });
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [
-    enableShortcut,
-    environmentId,
-    keybindings,
-    openInCwd,
-    openInEditorMutation,
-    preferredEditor,
-  ]);
+  }, [enableShortcut, keybindings, openPreferredEditor]);
+
+  useEffect(
+    () =>
+      onAppCommand((command) =>
+        command === "editor.openFavorite" ? openPreferredEditor() : false,
+      ),
+    [openPreferredEditor],
+  );
 
   return (
     <Group aria-label="Open in editor">

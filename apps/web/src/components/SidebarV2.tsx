@@ -85,6 +85,7 @@ import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore"
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import { useThreadActions } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { onAppCommand } from "../appCommandBus";
 import { openCommandPalette } from "../commandPaletteBus";
 import { startNewThreadFromContext } from "../lib/chatThreadActions";
 import { useClientSettings, useUpdateClientSettings } from "../hooks/useSettings";
@@ -2310,6 +2311,33 @@ export default function SidebarV2() {
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+  const navigateToThreadKey = useCallback(
+    (targetThreadKey: string | null): boolean => {
+      if (!targetThreadKey) return false;
+      const targetThread = threadByKey.get(targetThreadKey);
+      if (!targetThread) return false;
+      navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
+      return true;
+    },
+    [navigateToThread, threadByKey],
+  );
+  const executeThreadNavigationCommand = useCallback(
+    (command: string | null): boolean => {
+      const traversalDirection = threadTraversalDirectionFromCommand(command);
+      if (traversalDirection !== null) {
+        return navigateToThreadKey(
+          resolveAdjacentThreadId({
+            threadIds: orderedThreadKeys,
+            currentThreadId: routeThreadKey,
+            direction: traversalDirection,
+          }),
+        );
+      }
+      const jumpIndex = threadJumpIndexFromCommand(command ?? "");
+      return jumpIndex === null ? false : navigateToThreadKey(orderedThreadKeys[jumpIndex] ?? null);
+    },
+    [navigateToThreadKey, orderedThreadKeys, routeThreadKey],
+  );
   useEffect(() => {
     const onWindowKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat) return;
@@ -2321,40 +2349,23 @@ export default function SidebarV2() {
           modelPickerOpen: isModelPickerOpen(),
         },
       });
-      const navigateToThreadKey = (targetThreadKey: string | null) => {
-        if (!targetThreadKey) return false;
-        const targetThread = threadByKey.get(targetThreadKey);
-        if (!targetThread) return false;
-        event.preventDefault();
-        event.stopPropagation();
-        navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
-        return true;
-      };
-      const traversalDirection = threadTraversalDirectionFromCommand(command);
-      if (traversalDirection !== null) {
-        navigateToThreadKey(
-          resolveAdjacentThreadId({
-            threadIds: orderedThreadKeys,
-            currentThreadId: routeThreadKey,
-            direction: traversalDirection,
-          }),
-        );
-        return;
-      }
-      const jumpIndex = threadJumpIndexFromCommand(command ?? "");
-      if (jumpIndex === null) return;
-      navigateToThreadKey(orderedThreadKeys[jumpIndex] ?? null);
+      if (!executeThreadNavigationCommand(command)) return;
+      event.preventDefault();
+      event.stopPropagation();
     };
     window.addEventListener("keydown", onWindowKeyDown);
     return () => window.removeEventListener("keydown", onWindowKeyDown);
-  }, [
-    keybindings,
-    navigateToThread,
-    orderedThreadKeys,
-    routeTerminalOpen,
-    routeThreadKey,
-    threadByKey,
-  ]);
+  }, [keybindings, executeThreadNavigationCommand, routeTerminalOpen]);
+
+  useEffect(
+    () =>
+      onAppCommand((command) =>
+        command === "thread.previous" || command === "thread.next"
+          ? executeThreadNavigationCommand(command)
+          : false,
+      ),
+    [executeThreadNavigationCommand],
+  );
 
   // Same predicate as v1: hints show only while the held modifiers exactly
   // match a thread-jump binding. Adding Shift (screenshots) or Alt no

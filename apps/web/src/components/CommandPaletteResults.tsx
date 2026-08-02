@@ -56,12 +56,26 @@ function HighlightedSearchText(props: { text: string; query: string }) {
 
   return parts.map((part) =>
     part.highlighted ? (
-      <mark className="bg-transparent font-semibold text-foreground" key={part.start}>
+      <mark
+        className="rounded-[2px] bg-primary/15 px-px font-semibold text-foreground"
+        key={part.start}
+      >
         {part.text}
       </mark>
     ) : (
       part.text
     ),
+  );
+}
+
+function CommandPaletteItemTitle(props: {
+  item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
+  query: string;
+}) {
+  return typeof props.item.title === "string" ? (
+    <HighlightedSearchText text={props.item.title} query={props.query} />
+  ) : (
+    props.item.title
   );
 }
 
@@ -86,6 +100,7 @@ interface CommandPaletteResultsProps {
   isActionsOnly: boolean;
   keybindings: ResolvedKeybindingsConfig;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
+  query: string;
 }
 
 export function CommandPaletteResults(props: CommandPaletteResultsProps) {
@@ -103,12 +118,15 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
   return (
     <CommandList>
       {props.groups.map((group) => (
-        <CommandGroup items={group.items} key={group.value}>
+        <CommandGroup
+          items={group.items}
+          key={`${group.value}:${group.items.map((item) => item.value).join(",")}`}
+        >
           <CommandGroupLabel className="ps-[9px]">{group.label}</CommandGroupLabel>
           <CommandCollection>
             {(item) =>
               item.disabled ? (
-                <DisabledCommandPaletteResultRow item={item} key={item.value} />
+                <DisabledCommandPaletteResultRow item={item} key={item.value} query={props.query} />
               ) : (
                 <CommandPaletteResultRow
                   item={item}
@@ -116,6 +134,7 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
                   keybindings={props.keybindings}
                   isActive={props.highlightedItemValue === item.value}
                   onExecuteItem={props.onExecuteItem}
+                  query={props.query}
                 />
               )
             }
@@ -128,21 +147,28 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
 
 function DisabledCommandPaletteResultRow(props: {
   item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
+  query: string;
 }) {
   return (
-    <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
+    <CommandItem
+      disabled
+      value={props.item.value}
+      className="gap-2 opacity-64 data-disabled:pointer-events-none"
+    >
       {props.item.icon}
       {props.item.description || props.item.threadContentMatch ? (
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <span className="truncate">
+              <CommandPaletteItemTitle item={props.item} query={props.query} />
+            </span>
           </span>
           {props.item.threadContentMatch ? (
             <ThreadContentMatch match={props.item.threadContentMatch} />
           ) : null}
           {props.item.description ? (
-            <span className="truncate text-muted-foreground/70 text-xs">
+            <span className="truncate text-muted-foreground/85 text-xs">
               {props.item.description}
             </span>
           ) : null}
@@ -150,11 +176,13 @@ function DisabledCommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <span className="truncate">
+            <CommandPaletteItemTitle item={props.item} query={props.query} />
+          </span>
         </span>
       )}
       {props.item.titleTrailingContent}
-    </div>
+    </CommandItem>
   );
 }
 
@@ -163,6 +191,7 @@ function CommandPaletteResultRow(props: {
   isActive: boolean;
   keybindings: ResolvedKeybindingsConfig;
   onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
+  query: string;
 }) {
   const shortcutLabel = props.item.shortcutCommand
     ? shortcutLabelForCommand(props.keybindings, props.item.shortcutCommand)
@@ -172,8 +201,9 @@ function CommandPaletteResultRow(props: {
     <CommandItem
       value={props.item.value}
       className={cn(
-        "cursor-pointer gap-2 hover:bg-transparent hover:text-inherit data-highlighted:bg-transparent data-highlighted:text-inherit data-selected:bg-transparent data-selected:text-inherit [&[data-highlighted][data-selected]]:bg-transparent [&[data-highlighted][data-selected]]:text-inherit",
-        props.isActive && "bg-accent! text-accent-foreground!",
+        "relative cursor-pointer gap-2 hover:bg-transparent hover:text-inherit data-highlighted:bg-transparent data-highlighted:text-inherit data-selected:bg-transparent data-selected:text-inherit [&[data-highlighted][data-selected]]:bg-transparent [&[data-highlighted][data-selected]]:text-inherit",
+        props.isActive &&
+          "bg-foreground/[0.075]! text-foreground! ring-1 ring-foreground/10 ring-inset before:absolute before:inset-y-1.5 before:start-0 before:w-0.5 before:rounded-full before:bg-primary",
       )}
       onMouseDown={(event) => {
         event.preventDefault();
@@ -187,13 +217,15 @@ function CommandPaletteResultRow(props: {
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
             {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
+            <span className="truncate">
+              <CommandPaletteItemTitle item={props.item} query={props.query} />
+            </span>
           </span>
           {props.item.threadContentMatch ? (
             <ThreadContentMatch match={props.item.threadContentMatch} />
           ) : null}
           {props.item.description ? (
-            <span className="truncate text-muted-foreground/70 text-xs">
+            <span className="truncate text-muted-foreground/85 text-xs">
               {props.item.description}
             </span>
           ) : null}
@@ -201,12 +233,14 @@ function CommandPaletteResultRow(props: {
       ) : (
         <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
           {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
+          <span className="truncate">
+            <CommandPaletteItemTitle item={props.item} query={props.query} />
+          </span>
         </span>
       )}
       {props.item.titleTrailingContent}
       {props.item.timestamp ? (
-        <span className="min-w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground/70">
+        <span className="min-w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground/85">
           {props.item.timestamp}
         </span>
       ) : null}

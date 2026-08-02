@@ -3,11 +3,16 @@ import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools
 import type { Thread } from "../types";
 import {
   buildBrowseGroups,
+  buildRecentThreadItems,
   buildThreadActionItems,
   enumerateCommandPaletteItems,
   filterCommandPaletteGroups,
+  findCommandPaletteExecutionItem,
+  parseCommandPaletteQuery,
   reduceCommandPaletteUiState,
-  type CommandPaletteGroup,
+  SEARCH_GROUP_RESULT_LIMIT,
+  SEARCH_RESULT_LIMIT,
+  type CommandPaletteActionItem,
 } from "./CommandPalette.logic";
 
 describe("reduceCommandPaletteUiState", () => {
@@ -198,6 +203,7 @@ describe("buildThreadActionItems", () => {
 
     const groups = filterCommandPaletteGroups({
       activeGroups: [],
+      actionSearchItems: [],
       query: "project",
       isInSubmenu: false,
       projectSearchItems: [],
@@ -213,28 +219,23 @@ describe("buildThreadActionItems", () => {
   });
 
   it("preserves thread project-name matches when there is no stronger title match", () => {
-    const group: CommandPaletteGroup = {
-      value: "threads-search",
-      label: "Threads",
-      items: [
-        {
-          kind: "action",
-          value: "thread:project-context-only",
-          searchTerms: ["Fix navbar spacing", "Project"],
-          title: "Fix navbar spacing",
-          description: "Project",
-          icon: null,
-          run: async () => undefined,
-        },
-      ],
+    const item: CommandPaletteActionItem = {
+      kind: "action",
+      value: "thread:project-context-only",
+      searchTerms: ["Fix navbar spacing", "Project"],
+      title: "Fix navbar spacing",
+      description: "Project",
+      icon: null,
+      run: async () => undefined,
     };
 
     const groups = filterCommandPaletteGroups({
-      activeGroups: [group],
+      activeGroups: [],
+      actionSearchItems: [],
       query: "project",
       isInSubmenu: false,
       projectSearchItems: [],
-      threadSearchItems: [],
+      threadSearchItems: [item],
     });
 
     expect(groups).toHaveLength(1);
@@ -287,6 +288,209 @@ describe("buildThreadActionItems", () => {
     });
 
     expect(items.map((item) => item.value)).toEqual(["thread:thread-active"]);
+  });
+});
+
+function actionItem(
+  value: string,
+  title: string,
+  searchTerms: ReadonlyArray<string> = [title],
+): CommandPaletteActionItem {
+  return {
+    kind: "action",
+    value,
+    searchTerms,
+    title,
+    icon: null,
+    run: async () => undefined,
+  };
+}
+
+describe("command palette search", () => {
+  it("parses root scopes while preserving ordinary queries", () => {
+    expect(parseCommandPaletteQuery("  > terminal")).toEqual({
+      scope: "actions",
+      query: "terminal",
+    });
+    expect(parseCommandPaletteQuery("@workspace")).toEqual({
+      scope: "projects",
+      query: "workspace",
+    });
+    expect(parseCommandPaletteQuery("# reconnect")).toEqual({
+      scope: "threads",
+      query: "reconnect",
+    });
+    expect(parseCommandPaletteQuery("regular search")).toEqual({
+      scope: "all",
+      query: "regular search",
+    });
+  });
+
+  it("shows the curated default groups until a query or scope is entered", () => {
+    const suggested = actionItem("action:new", "New thread");
+    const recent = actionItem("thread:recent", "Recent thread");
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [
+        { value: "suggested", label: "Suggested", items: [suggested] },
+        { value: "recent-threads", label: "Recent threads", items: [recent] },
+      ],
+      actionSearchItems: [suggested, actionItem("action:terminal", "Toggle terminal")],
+      query: "",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [recent],
+    });
+
+    expect(groups.map((group) => group.value)).toEqual(["suggested", "recent-threads"]);
+  });
+
+  it("exposes complete scoped collections even before scope text is entered", () => {
+    const actions = [
+      actionItem("action:new", "New thread"),
+      actionItem("action:terminal", "Toggle terminal"),
+    ];
+    const projects = [actionItem("project:t3", "T3 Code")];
+    const threads = [actionItem("thread:palette", "Fix command palette")];
+    const base = {
+      activeGroups: [],
+      actionSearchItems: actions,
+      isInSubmenu: false,
+      projectSearchItems: projects,
+      threadSearchItems: threads,
+    } as const;
+
+    expect(filterCommandPaletteGroups({ ...base, query: ">" })[0]?.items).toEqual(actions);
+    expect(filterCommandPaletteGroups({ ...base, query: "@" })[0]?.items).toEqual(projects);
+    expect(filterCommandPaletteGroups({ ...base, query: "#" })[0]?.items).toEqual(threads);
+  });
+
+  it("ranks exact matches globally instead of preserving source-group order", () => {
+    const weakAction = actionItem("action:project-settings", "Project settings");
+    const exactThread = actionItem("thread:project", "Project");
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      actionSearchItems: [weakAction],
+      query: "project",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [exactThread],
+    });
+
+    expect(groups.map((group) => group.value)).toEqual(["threads-search", "actions-search"]);
+    expect(groups[0]?.items[0]?.value).toBe("thread:project");
+  });
+
+  it("always searches visible string titles even when synonyms omit the exact copy", () => {
+    const rename = {
+      ...actionItem("action:rename", "Rename current thread"),
+      searchTerms: ["edit title", "change name"],
+    };
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      actionSearchItems: [rename],
+      query: "rename current thread",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items[0]?.value).toBe(rename.value);
+  });
+
+  it("accepts a bounded fuzzy subsequence without matching unrelated text", () => {
+    const terminal = actionItem("command:terminal.toggle", "Toggle terminal");
+    const sidebar = actionItem("command:sidebar.toggle", "Toggle sidebar");
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      actionSearchItems: [terminal, sidebar],
+      query: "termnal",
+      isInSubmenu: false,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items.map((item) => item.value)).toEqual(["command:terminal.toggle"]);
+  });
+
+  it("caps global results and prevents one group from crowding out every other type", () => {
+    const actions = Array.from({ length: 20 }, (_, index) =>
+      actionItem(`action:${index}`, `Common action ${index}`),
+    );
+    const projects = Array.from({ length: 20 }, (_, index) =>
+      actionItem(`project:${index}`, `Common project ${index}`),
+    );
+    const threads = Array.from({ length: 20 }, (_, index) =>
+      actionItem(`thread:${index}`, `Common thread ${index}`),
+    );
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [],
+      actionSearchItems: actions,
+      query: "common",
+      isInSubmenu: false,
+      projectSearchItems: projects,
+      threadSearchItems: threads,
+    });
+
+    expect(groups.flatMap((group) => group.items)).toHaveLength(SEARCH_RESULT_LIMIT);
+    expect(groups).toHaveLength(3);
+    for (const group of groups) {
+      expect(group.items.length).toBeLessThanOrEqual(SEARCH_GROUP_RESULT_LIMIT);
+    }
+  });
+
+  it("treats scope characters literally inside submenus", () => {
+    const scopedName = actionItem("project:at", "@workspace");
+    const groups = filterCommandPaletteGroups({
+      activeGroups: [{ value: "projects", label: "Projects", items: [scopedName] }],
+      actionSearchItems: [],
+      query: "@workspace",
+      isInSubmenu: true,
+      projectSearchItems: [],
+      threadSearchItems: [],
+    });
+
+    expect(groups[0]?.items[0]?.value).toBe("project:at");
+  });
+});
+
+describe("buildRecentThreadItems", () => {
+  it("excludes the active thread and caps the empty-state list", () => {
+    const items = Array.from({ length: 8 }, (_, index) =>
+      actionItem(`thread:thread-${index}`, `Thread ${index}`),
+    );
+
+    expect(
+      buildRecentThreadItems(items, ThreadId.make("thread-1")).map((item) => item.value),
+    ).toEqual([
+      "thread:thread-0",
+      "thread:thread-2",
+      "thread:thread-3",
+      "thread:thread-4",
+      "thread:thread-5",
+    ]);
+  });
+});
+
+describe("findCommandPaletteExecutionItem", () => {
+  it("uses the highlighted executable item and falls back past disabled rows", () => {
+    const disabled = { ...actionItem("action:disabled", "Disabled"), disabled: true };
+    const first = actionItem("action:first", "First");
+    const highlighted = actionItem("action:highlighted", "Highlighted");
+    const groups = [{ value: "actions", label: "Actions", items: [disabled, first, highlighted] }];
+
+    expect(findCommandPaletteExecutionItem(groups, highlighted.value)).toBe(highlighted);
+    expect(findCommandPaletteExecutionItem(groups, disabled.value)).toBe(first);
+    expect(findCommandPaletteExecutionItem(groups, "missing")).toBe(first);
+  });
+
+  it("returns null when every visible row is disabled", () => {
+    const disabled = { ...actionItem("action:disabled", "Disabled"), disabled: true };
+    expect(
+      findCommandPaletteExecutionItem(
+        [{ value: "actions", label: "Actions", items: [disabled] }],
+        null,
+      ),
+    ).toBeNull();
   });
 });
 

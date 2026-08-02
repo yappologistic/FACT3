@@ -114,6 +114,7 @@ import {
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import { isCommandPaletteOpen } from "../commandPaletteBus";
+import { onAppCommand } from "../appCommandBus";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
@@ -4341,6 +4342,104 @@ function ChatViewContent(props: ChatViewProps) {
     terminalUiOpenByThreadRef.current[activeThreadKey] = current;
   }, [activeThreadKey, focusComposer, terminalUiState.terminalOpen]);
 
+  const executeChatViewCommand = useCallback(
+    (command: string | null): boolean => {
+      if (!activeThreadId || !command) return false;
+
+      const terminalFocusOwner = getTerminalFocusOwner();
+      if (command === "terminal.toggle") {
+        toggleTerminalVisibility();
+        return true;
+      }
+
+      if (command === "rightPanel.toggle") {
+        toggleRightPanel();
+        return true;
+      }
+
+      if (command === "terminal.split") {
+        if (terminalFocusOwner === "right-panel") {
+          splitPanelTerminal();
+          return true;
+        }
+        if (!terminalUiState.terminalOpen) {
+          setTerminalOpen(true);
+        }
+        splitTerminal();
+        return true;
+      }
+
+      if (command === "terminal.splitVertical") {
+        if (terminalFocusOwner === "right-panel") {
+          splitPanelTerminal("vertical");
+          return true;
+        }
+        if (!terminalUiState.terminalOpen) {
+          setTerminalOpen(true);
+        }
+        splitTerminal("vertical");
+        return true;
+      }
+
+      if (command === "terminal.close") {
+        if (terminalFocusOwner === "right-panel" && activeRightPanelSurface?.kind === "terminal") {
+          closePanelTerminal(activeRightPanelSurface.activeTerminalId);
+          return true;
+        }
+        if (!terminalUiState.terminalOpen) return false;
+        closeTerminal(terminalUiState.activeTerminalId);
+        return true;
+      }
+
+      if (command === "terminal.new") {
+        if (terminalFocusOwner === "right-panel") {
+          addTerminalSurface();
+          return true;
+        }
+        if (!terminalUiState.terminalOpen) {
+          setTerminalOpen(true);
+        }
+        createNewTerminal();
+        return true;
+      }
+
+      if (command === "diff.toggle") {
+        onToggleDiff();
+        return true;
+      }
+
+      if (command === "modelPicker.toggle") {
+        composerRef.current?.toggleModelPicker();
+        return composerRef.current !== null;
+      }
+
+      const scriptId = projectScriptIdFromCommand(command);
+      if (!scriptId || !activeProject) return false;
+      const script = activeProject.scripts.find((entry) => entry.id === scriptId);
+      if (!script) return false;
+      void runProjectScript(script);
+      return true;
+    },
+    [
+      activeProject,
+      activeRightPanelSurface,
+      activeThreadId,
+      addTerminalSurface,
+      closePanelTerminal,
+      closeTerminal,
+      createNewTerminal,
+      onToggleDiff,
+      runProjectScript,
+      setTerminalOpen,
+      splitPanelTerminal,
+      splitTerminal,
+      terminalUiState.activeTerminalId,
+      terminalUiState.terminalOpen,
+      toggleRightPanel,
+      toggleTerminalVisibility,
+    ],
+  );
+
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (!activeThreadId || isCommandPaletteOpen()) {
@@ -4371,120 +4470,16 @@ function ChatViewContent(props: ChatViewProps) {
       const command = resolveShortcutCommand(event, keybindings, {
         context: shortcutContext,
       });
-      if (!command) return;
+      if (!executeChatViewCommand(command)) return;
 
-      if (command === "terminal.toggle") {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleTerminalVisibility();
-        return;
-      }
-
-      if (command === "rightPanel.toggle") {
-        event.preventDefault();
-        event.stopPropagation();
-        toggleRightPanel();
-        return;
-      }
-
-      if (command === "terminal.split") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (terminalFocusOwner === "right-panel") {
-          splitPanelTerminal();
-          return;
-        }
-        if (!terminalUiState.terminalOpen) {
-          setTerminalOpen(true);
-        }
-        splitTerminal();
-        return;
-      }
-
-      if (command === "terminal.splitVertical") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (terminalFocusOwner === "right-panel") {
-          splitPanelTerminal("vertical");
-          return;
-        }
-        if (!terminalUiState.terminalOpen) {
-          setTerminalOpen(true);
-        }
-        splitTerminal("vertical");
-        return;
-      }
-
-      if (command === "terminal.close") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (terminalFocusOwner === "right-panel" && activeRightPanelSurface?.kind === "terminal") {
-          closePanelTerminal(activeRightPanelSurface.activeTerminalId);
-          return;
-        }
-        if (!terminalUiState.terminalOpen) return;
-        closeTerminal(terminalUiState.activeTerminalId);
-        return;
-      }
-
-      if (command === "terminal.new") {
-        event.preventDefault();
-        event.stopPropagation();
-        if (terminalFocusOwner === "right-panel") {
-          addTerminalSurface();
-          return;
-        }
-        if (!terminalUiState.terminalOpen) {
-          setTerminalOpen(true);
-        }
-        createNewTerminal();
-        return;
-      }
-
-      if (command === "diff.toggle") {
-        event.preventDefault();
-        event.stopPropagation();
-        onToggleDiff();
-        return;
-      }
-
-      if (command === "modelPicker.toggle") {
-        event.preventDefault();
-        event.stopPropagation();
-        composerRef.current?.toggleModelPicker();
-        return;
-      }
-
-      const scriptId = projectScriptIdFromCommand(command);
-      if (!scriptId || !activeProject) return;
-      const script = activeProject.scripts.find((entry) => entry.id === scriptId);
-      if (!script) return;
       event.preventDefault();
       event.stopPropagation();
-      void runProjectScript(script);
     };
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [
-    activeProject,
-    activeRightPanelSurface,
-    addTerminalSurface,
-    terminalUiState.terminalOpen,
-    terminalUiState.activeTerminalId,
-    activeThreadId,
-    closeTerminal,
-    closePanelTerminal,
-    createNewTerminal,
-    setTerminalOpen,
-    runProjectScript,
-    splitTerminal,
-    splitPanelTerminal,
-    keybindings,
-    onToggleDiff,
-    toggleRightPanel,
-    toggleTerminalVisibility,
-    composerRef,
-  ]);
+  }, [activeThreadId, executeChatViewCommand, keybindings, terminalUiState.terminalOpen]);
+
+  useEffect(() => onAppCommand(executeChatViewCommand), [executeChatViewCommand]);
 
   const onRevertToTurnCount = useCallback(
     async (turnCount: number) => {

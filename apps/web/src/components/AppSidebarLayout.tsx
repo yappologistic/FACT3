@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useLocation, useNavigate } from "@tanstack/react-router";
 
+import { onAppCommand } from "../appCommandBus";
 import { isElectron } from "../env";
 import { getLocalStorageItem } from "../hooks/useLocalStorage";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
@@ -88,6 +89,16 @@ function SidebarControl() {
     window.addEventListener("keydown", onKeyDown, true);
     return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [keybindings, toggleSidebar]);
+
+  useEffect(
+    () =>
+      onAppCommand((command) => {
+        if (command !== "sidebar.toggle") return false;
+        toggleSidebar();
+        return true;
+      }),
+    [toggleSidebar],
+  );
 
   return (
     <div

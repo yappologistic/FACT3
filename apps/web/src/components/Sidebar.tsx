@@ -110,6 +110,7 @@ import { useNewThreadHandler } from "../hooks/useHandleNewThread";
 import { useDesktopUpdateState } from "../state/desktopUpdate";
 
 import { useThreadActions } from "../hooks/useThreadActions";
+import { onAppCommand } from "../appCommandBus";
 import { projectEnvironment } from "../state/projects";
 import { useEnvironmentQuery } from "../state/query";
 import { threadEnvironment, useEnvironmentThread } from "../state/threads";
@@ -3403,6 +3404,35 @@ export default function Sidebar() {
     updateThreadJumpHintsVisibility(shouldShowThreadJumpHintsNow);
   }, [shouldShowThreadJumpHintsNow, updateThreadJumpHintsVisibility]);
 
+  const executeThreadNavigationCommand = useCallback(
+    (command: string | null): boolean => {
+      const traversalDirection = threadTraversalDirectionFromCommand(command);
+      const targetThreadKey =
+        traversalDirection === null
+          ? (() => {
+              const jumpIndex = threadJumpIndexFromCommand(command ?? "");
+              return jumpIndex === null ? null : (threadJumpThreadKeys[jumpIndex] ?? null);
+            })()
+          : resolveAdjacentThreadId({
+              threadIds: orderedSidebarThreadKeys,
+              currentThreadId: routeThreadKey,
+              direction: traversalDirection,
+            });
+      if (!targetThreadKey) return false;
+      const targetThread = sidebarThreadByKey.get(targetThreadKey);
+      if (!targetThread) return false;
+      navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
+      return true;
+    },
+    [
+      navigateToThread,
+      orderedSidebarThreadKeys,
+      routeThreadKey,
+      sidebarThreadByKey,
+      threadJumpThreadKeys,
+    ],
+  );
+
   useEffect(() => {
     const onWindowKeyDown = (event: globalThis.KeyboardEvent) => {
       const shortcutContext = getCurrentSidebarShortcutContext();
@@ -3415,44 +3445,9 @@ export default function Sidebar() {
         platform,
         context: shortcutContext,
       });
-      const traversalDirection = threadTraversalDirectionFromCommand(command);
-      if (traversalDirection !== null) {
-        const targetThreadKey = resolveAdjacentThreadId({
-          threadIds: orderedSidebarThreadKeys,
-          currentThreadId: routeThreadKey,
-          direction: traversalDirection,
-        });
-        if (!targetThreadKey) {
-          return;
-        }
-        const targetThread = sidebarThreadByKey.get(targetThreadKey);
-        if (!targetThread) {
-          return;
-        }
-
-        event.preventDefault();
-        event.stopPropagation();
-        navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
-        return;
-      }
-
-      const jumpIndex = threadJumpIndexFromCommand(command ?? "");
-      if (jumpIndex === null) {
-        return;
-      }
-
-      const targetThreadKey = threadJumpThreadKeys[jumpIndex];
-      if (!targetThreadKey) {
-        return;
-      }
-      const targetThread = sidebarThreadByKey.get(targetThreadKey);
-      if (!targetThread) {
-        return;
-      }
-
+      if (!executeThreadNavigationCommand(command)) return;
       event.preventDefault();
       event.stopPropagation();
-      navigateToThread(scopeThreadRef(targetThread.environmentId, targetThread.id));
     };
 
     window.addEventListener("keydown", onWindowKeyDown);
@@ -3460,16 +3455,17 @@ export default function Sidebar() {
     return () => {
       window.removeEventListener("keydown", onWindowKeyDown);
     };
-  }, [
-    getCurrentSidebarShortcutContext,
-    keybindings,
-    navigateToThread,
-    orderedSidebarThreadKeys,
-    platform,
-    routeThreadKey,
-    sidebarThreadByKey,
-    threadJumpThreadKeys,
-  ]);
+  }, [getCurrentSidebarShortcutContext, executeThreadNavigationCommand, keybindings, platform]);
+
+  useEffect(
+    () =>
+      onAppCommand((command) =>
+        command === "thread.previous" || command === "thread.next"
+          ? executeThreadNavigationCommand(command)
+          : false,
+      ),
+    [executeThreadNavigationCommand],
+  );
 
   useEffect(() => {
     const onMouseDown = (event: globalThis.MouseEvent) => {
