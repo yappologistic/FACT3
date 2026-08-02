@@ -17,6 +17,10 @@ import { memo, useMemo, useState, type ComponentType, type ReactNode } from "rea
 import { ThinkingOrb } from "thinking-orbs";
 
 import { cn } from "~/lib/utils";
+import {
+  FLOATING_SQUIRCLE_ITEM_CLASS_NAME,
+  FLOATING_SQUIRCLE_SURFACE_CLASS_NAME,
+} from "../ui/floatingSquircle";
 import { Popover, PopoverPopup, PopoverTitle, PopoverTrigger } from "../ui/popover";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { SubagentActivityIndicator, SubagentAvatar } from "./SubagentActivityIndicator";
@@ -40,6 +44,8 @@ const ACTIVITY_SECTIONS: ReadonlyArray<{
   { value: "subagents", label: "Sub-agents", Icon: BotIcon },
   { value: "tasks", label: "Tasks", Icon: ListTodoIcon },
 ];
+
+export const ACTIVITY_SECTION_ITEM_CLASS_NAME = FLOATING_SQUIRCLE_ITEM_CLASS_NAME;
 
 function statusCopy(status: ComposerActivityItemStatus): string {
   switch (status) {
@@ -368,7 +374,10 @@ function ComposerActivityPanel(props: {
           <SelectPopup
             align="start"
             className="min-w-44"
-            popupClassName="composer-activity-panel-menu rounded-[20px]!"
+            popupClassName={cn(
+              "composer-activity-panel-menu",
+              FLOATING_SQUIRCLE_SURFACE_CLASS_NAME,
+            )}
             positionerClassName="z-[80]"
             side="bottom"
             sideOffset={5}
@@ -381,7 +390,7 @@ function ComposerActivityPanel(props: {
                     ? props.details.subagents.length
                     : props.details.tasks.length;
               return (
-                <SelectItem key={value} value={value}>
+                <SelectItem className={ACTIVITY_SECTION_ITEM_CLASS_NAME} key={value} value={value}>
                   <span className="flex items-center gap-2">
                     <Icon aria-hidden className="size-3.5" />
                     <span>{label}</span>

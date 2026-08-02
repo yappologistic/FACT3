@@ -9,6 +9,7 @@ import { buttonVariants } from "../ui/button";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
+import { FLOATING_SQUIRCLE_SURFACE_CLASS_NAME } from "../ui/floatingSquircle";
 import { ModelPickerContent } from "./ModelPickerContent";
 import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import {
@@ -189,7 +190,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <PopoverPopup
         align="start"
         className="border-0 bg-transparent p-0 shadow-none before:hidden [-webkit-backdrop-filter:none]! [--viewport-inline-padding:0] [backdrop-filter:none]!"
-        viewportClassName="rounded-lg !overflow-hidden p-0"
+        viewportClassName={cn(FLOATING_SQUIRCLE_SURFACE_CLASS_NAME, "!overflow-hidden p-0")}
       >
         <ModelPickerContent
           activeInstanceId={activeInstanceId}

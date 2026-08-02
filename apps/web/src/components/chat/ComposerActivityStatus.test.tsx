@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 import {
+  ACTIVITY_SECTION_ITEM_CLASS_NAME,
   ComposerActivityStatus,
   SubagentActivityRow,
   ToolActivityRow,
@@ -16,6 +17,10 @@ const EMPTY_DETAILS: ComposerActivityDetails = {
 };
 
 describe("ComposerActivityStatus", () => {
+  it("keeps activity menu highlights concentric with the popup shell", () => {
+    expect(ACTIVITY_SECTION_ITEM_CLASS_NAME).toContain("rounded-[16px]");
+  });
+
   it("keeps the compact animated orb and opens activity details", () => {
     const markup = renderToStaticMarkup(
       <ComposerActivityStatus

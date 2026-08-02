@@ -3,6 +3,10 @@ import { memo, type ReactNode } from "react";
 import { EllipsisIcon, ListTodoIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import {
+  FLOATING_SQUIRCLE_ITEM_CLASS_NAME,
+  FLOATING_SQUIRCLE_SURFACE_CLASS_NAME,
+} from "../ui/floatingSquircle";
+import {
   Menu,
   MenuItem,
   MenuPopup,
@@ -38,7 +42,7 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
       >
         <EllipsisIcon aria-hidden="true" className="size-4" />
       </MenuTrigger>
-      <MenuPopup align="start">
+      <MenuPopup align="start" className={FLOATING_SQUIRCLE_SURFACE_CLASS_NAME}>
         {props.traitsMenuContent ? (
           <>
             {props.traitsMenuContent}
@@ -55,8 +59,12 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
                 props.onToggleInteractionMode();
               }}
             >
-              <MenuRadioItem value="default">Chat</MenuRadioItem>
-              <MenuRadioItem value="plan">Plan</MenuRadioItem>
+              <MenuRadioItem className={FLOATING_SQUIRCLE_ITEM_CLASS_NAME} value="default">
+                Chat
+              </MenuRadioItem>
+              <MenuRadioItem className={FLOATING_SQUIRCLE_ITEM_CLASS_NAME} value="plan">
+                Plan
+              </MenuRadioItem>
             </MenuRadioGroup>
             <MenuDivider />
           </>
@@ -69,15 +77,26 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             props.onRuntimeModeChange(value as RuntimeMode);
           }}
         >
-          <MenuRadioItem value="approval-required">Supervised</MenuRadioItem>
-          <MenuRadioItem value="auto-accept-edits">Auto-accept edits</MenuRadioItem>
-          <MenuRadioItem value="auto">Auto</MenuRadioItem>
-          <MenuRadioItem value="full-access">Full access</MenuRadioItem>
+          <MenuRadioItem className={FLOATING_SQUIRCLE_ITEM_CLASS_NAME} value="approval-required">
+            Supervised
+          </MenuRadioItem>
+          <MenuRadioItem className={FLOATING_SQUIRCLE_ITEM_CLASS_NAME} value="auto-accept-edits">
+            Auto-accept edits
+          </MenuRadioItem>
+          <MenuRadioItem className={FLOATING_SQUIRCLE_ITEM_CLASS_NAME} value="auto">
+            Auto
+          </MenuRadioItem>
+          <MenuRadioItem className={FLOATING_SQUIRCLE_ITEM_CLASS_NAME} value="full-access">
+            Full access
+          </MenuRadioItem>
         </MenuRadioGroup>
         {props.activePlan ? (
           <>
             <MenuDivider />
-            <MenuItem onClick={props.onTogglePlanSidebar}>
+            <MenuItem
+              className={FLOATING_SQUIRCLE_ITEM_CLASS_NAME}
+              onClick={props.onTogglePlanSidebar}
+            >
               <ListTodoIcon className="size-4 shrink-0" />
               {props.planSidebarOpen
                 ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`

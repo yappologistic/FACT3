@@ -31,6 +31,10 @@ import { useComposerDraftStore, DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
+import {
+  FLOATING_SQUIRCLE_ITEM_CLASS_NAME,
+  FLOATING_SQUIRCLE_SURFACE_CLASS_NAME,
+} from "../ui/floatingSquircle";
 import { ComposerControl, ComposerControlChevron, ComposerControlIcon } from "./ComposerControl";
 
 type ProviderOptions = ReadonlyArray<ProviderOptionSelection>;
@@ -320,6 +324,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
               >
                 {descriptor.options.map((option) => (
                   <MenuRadioItem
+                    className={FLOATING_SQUIRCLE_ITEM_CLASS_NAME}
                     key={option.id}
                     value={option.id}
                     hideIndicator
@@ -362,7 +367,12 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
                 }}
               >
                 {(["on", "off"] as const).map((value) => (
-                  <MenuRadioItem key={value} value={value} hideIndicator>
+                  <MenuRadioItem
+                    className={FLOATING_SQUIRCLE_ITEM_CLASS_NAME}
+                    key={value}
+                    value={value}
+                    hideIndicator
+                  >
                     <span className="flex w-full min-w-0 items-center justify-between gap-3">
                       <span>{value === "on" ? "On" : "Off"}</span>
                     </span>
@@ -523,7 +533,7 @@ export const TraitsPicker = memo(function TraitsPicker({
           </>
         )}
       </MenuTrigger>
-      <MenuPopup align="start">
+      <MenuPopup align="start" className={FLOATING_SQUIRCLE_SURFACE_CLASS_NAME}>
         <TraitsMenuContent
           provider={provider}
           {...(instanceId ? { instanceId } : {})}

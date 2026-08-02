@@ -46,6 +46,10 @@ import { DiffPanelLoadingState, DiffPanelShell, type DiffPanelMode } from "./Dif
 import { DiffStatLabel } from "./chat/DiffStatLabel";
 import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./diffs/AnnotatableCodeView";
 import { Button } from "./ui/button";
+import {
+  FLOATING_SQUIRCLE_ITEM_CLASS_NAME,
+  FLOATING_SQUIRCLE_SURFACE_CLASS_NAME,
+} from "./ui/floatingSquircle";
 import { ToggleGroup, Toggle } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
 import {
@@ -631,7 +635,10 @@ export default function DiffPanel({
               </ComboboxTrigger>
               <ComboboxPopup
                 align="start"
-                className="w-72 min-w-0 max-w-[calc(100vw-1rem)] overflow-hidden [&>[data-slot=combobox-popup]]:min-w-0 [&>[data-slot=combobox-popup]]:overflow-hidden"
+                className={cn(
+                  "w-72 min-w-0 max-w-[calc(100vw-1rem)] overflow-hidden [&>[data-slot=combobox-popup]]:min-w-0 [&>[data-slot=combobox-popup]]:overflow-hidden",
+                  FLOATING_SQUIRCLE_SURFACE_CLASS_NAME,
+                )}
               >
                 <div className="min-w-0 shrink-0 px-3 pt-2.5">
                   <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
@@ -661,7 +668,10 @@ export default function DiffPanel({
                 <ComboboxEmpty>No matching refs.</ComboboxEmpty>
                 <ComboboxList className="max-h-64 min-w-0 overflow-x-hidden">
                   <ComboboxItem
-                    className="h-8 w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)] py-0"
+                    className={cn(
+                      "h-8 w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)] py-0",
+                      FLOATING_SQUIRCLE_ITEM_CLASS_NAME,
+                    )}
                     contentClassName="w-full min-w-0 overflow-hidden"
                     value={AUTOMATIC_BASE_REF}
                   >
@@ -674,7 +684,10 @@ export default function DiffPanel({
                     return (
                       <ComboboxItem
                         key={choice.id}
-                        className="h-8 w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)] py-0"
+                        className={cn(
+                          "h-8 w-full min-w-0 grid-cols-[1rem_minmax(0,1fr)] py-0",
+                          FLOATING_SQUIRCLE_ITEM_CLASS_NAME,
+                        )}
                         contentClassName="w-full min-w-0 overflow-hidden"
                         value={item}
                       >

@@ -167,6 +167,10 @@ function ComposerCommandMenuLayer(props: { anchor: HTMLElement | null; children:
   );
 }
 import { Button } from "../ui/button";
+import {
+  FLOATING_SQUIRCLE_ITEM_CLASS_NAME,
+  FLOATING_SQUIRCLE_SURFACE_CLASS_NAME,
+} from "../ui/floatingSquircle";
 import { Select, SelectItem, SelectPopup, SelectValue } from "../ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
@@ -343,12 +347,20 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
             <ComposerControlIcon icon={RuntimeModeIcon} />
             <SelectValue>{runtimeModeOption.label}</SelectValue>
           </TooltipTrigger>
-          <SelectPopup alignItemWithTrigger={false}>
+          <SelectPopup
+            alignItemWithTrigger={false}
+            popupClassName={FLOATING_SQUIRCLE_SURFACE_CLASS_NAME}
+          >
             {runtimeModeOptions.map((mode) => {
               const option = runtimeModeConfig[mode];
               const OptionIcon = option.icon;
               return (
-                <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
+                <SelectItem
+                  className={cn("min-w-64 py-2", FLOATING_SQUIRCLE_ITEM_CLASS_NAME)}
+                  key={mode}
+                  value={mode}
+                  hideIndicator
+                >
                   <div className="flex min-w-0 items-center gap-3">
                     <div className="grid min-w-0 flex-1 gap-0.5">
                       <span className="inline-flex items-center gap-1.5 font-medium text-foreground">

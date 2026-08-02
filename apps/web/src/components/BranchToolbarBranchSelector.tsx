@@ -50,6 +50,10 @@ import {
   resolveThreadPr,
 } from "./ThreadStatusIndicators";
 import { Button } from "./ui/button";
+import {
+  FLOATING_SQUIRCLE_ITEM_CLASS_NAME,
+  FLOATING_SQUIRCLE_SURFACE_CLASS_NAME,
+} from "./ui/floatingSquircle";
 import { Switch } from "./ui/switch";
 import {
   Combobox,
@@ -625,7 +629,7 @@ export function BranchToolbarBranchSelector({
           key={itemValue}
           index={index}
           value={itemValue}
-          className="pe-2"
+          className={cn("pe-2", FLOATING_SQUIRCLE_ITEM_CLASS_NAME)}
           onClick={() => {
             if (!prReference || !onCheckoutPullRequestRequest) {
               return;
@@ -655,7 +659,7 @@ export function BranchToolbarBranchSelector({
           key={itemValue}
           index={index}
           value={itemValue}
-          className="pe-1.5"
+          className={cn("pe-1.5", FLOATING_SQUIRCLE_ITEM_CLASS_NAME)}
           onClick={() => createRef(trimmedBranchQuery)}
         >
           <span className="truncate">Create new ref &quot;{trimmedBranchQuery}&quot;</span>
@@ -683,7 +687,7 @@ export function BranchToolbarBranchSelector({
         key={itemValue}
         index={index}
         value={itemValue}
-        className="pe-1.5"
+        className={cn("pe-1.5", FLOATING_SQUIRCLE_ITEM_CLASS_NAME)}
         onClick={() => selectBranch(refName)}
         onContextMenu={(event) => handleBranchContextMenu(event, itemValue)}
       >
@@ -754,7 +758,11 @@ export function BranchToolbarBranchSelector({
           </ComboboxTrigger>
         </span>
       </div>
-      <ComboboxPopup align="end" side="top" className="flex w-80 flex-col">
+      <ComboboxPopup
+        align="end"
+        side="top"
+        className={cn("flex w-80 flex-col overflow-hidden", FLOATING_SQUIRCLE_SURFACE_CLASS_NAME)}
+      >
         <div className="shrink-0 px-3 pt-2.5">
           <div className="relative -translate-y-px border-b border-border/70 pb-1.5 transition-colors focus-within:border-ring">
             <SearchIcon
