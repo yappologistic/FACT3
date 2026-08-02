@@ -1,39 +1,52 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 import { ComposerActivityStatus } from "./ComposerActivityStatus";
+import type { ComposerActivityDetails } from "./composerActivityDetails";
+
+const EMPTY_DETAILS: ComposerActivityDetails = {
+  tools: [],
+  subagents: [],
+  tasks: [],
+  hasHistory: false,
+};
 
 describe("ComposerActivityStatus", () => {
-  it("renders the working state in the composer activity rail", () => {
+  it("keeps the compact animated orb and opens activity details", () => {
     const markup = renderToStaticMarkup(
       <ComposerActivityStatus
         activity={{ title: "Thinking…" }}
         activeSubagentCount={0}
+        details={EMPTY_DETAILS}
+        isActive
         theme="dark"
       />,
     );
 
     expect(markup).toContain('data-chat-composer-activity="true"');
-    expect(markup).toContain('aria-label="Thinking…"');
-    expect(markup).toContain('class="thinking-orb-motion"');
+    expect(markup).toContain("Thinking…. Open activity details");
+    expect(markup).toContain("thinking-orb-motion");
     expect(markup).toContain("text-[13px]");
     expect(markup).toContain("width:32px");
-    expect(markup).toContain("Thinking…");
     expect(markup).toContain("justify-center");
     expect(markup).toContain("<canvas");
-    expect(markup).not.toContain("sub-agent");
+    expect(markup).not.toContain("sub-agent running");
   });
 
-  it("shows live activity and progress without changing the orb size", () => {
+  it("shows live activity and sub-agent progress without changing the orb size", () => {
     const markup = renderToStaticMarkup(
       <ComposerActivityStatus
         activity={{ title: "Searching session lifecycle", detail: "Reading files · 3 of 7" }}
         activeSubagentCount={2}
+        details={EMPTY_DETAILS}
+        isActive
         theme="dark"
       />,
     );
 
     expect(markup).toContain("Searching session lifecycle");
     expect(markup).toContain("Reading files · 3 of 7");
+    expect(markup).toContain("2 sub-agents running");
+    expect(markup).toContain('data-subagent-count="2"');
     expect(markup).toContain("width:32px");
     expect(markup).not.toContain("thinking-orb-shimmer");
   });
@@ -47,6 +60,8 @@ describe("ComposerActivityStatus", () => {
           detailKind: "command",
         }}
         activeSubagentCount={0}
+        details={EMPTY_DETAILS}
+        isActive
         theme="dark"
       />,
     );
@@ -56,32 +71,42 @@ describe("ComposerActivityStatus", () => {
     expect(markup).toContain("deriveTimelineEntries");
   });
 
-  it("shows a singular live sub-agent count", () => {
+  it("keeps a completed summary with persistent history", () => {
+    const details: ComposerActivityDetails = {
+      tools: [
+        {
+          id: "tool-1",
+          title: "Ran command",
+          status: "completed",
+          createdAt: "2026-08-02T00:00:00.000Z",
+          rawData: { command: "vp test" },
+        },
+      ],
+      subagents: [
+        {
+          id: "agent-1",
+          name: "Web review",
+          status: "completed",
+          createdAt: "2026-08-02T00:00:00.000Z",
+        },
+      ],
+      tasks: [],
+      hasHistory: true,
+    };
     const markup = renderToStaticMarkup(
       <ComposerActivityStatus
         activity={{ title: "Thinking…" }}
-        activeSubagentCount={1}
-        theme="dark"
-      />,
-    );
-
-    expect(markup).toContain('aria-label="Thinking…, 1 sub-agent running"');
-    expect(markup).toContain('data-subagent-count="1"');
-    expect(markup).toContain("sub-agent");
-  });
-
-  it("shows up to three overlapping orbs with the full live count", () => {
-    const markup = renderToStaticMarkup(
-      <ComposerActivityStatus
-        activity={{ title: "Thinking…" }}
-        activeSubagentCount={4}
+        activeSubagentCount={0}
+        completionState="completed"
+        details={details}
+        isActive={false}
         theme="light"
       />,
     );
 
-    expect(markup).toContain('aria-label="Thinking…, 4 sub-agents running"');
-    expect(markup).toContain('data-subagent-count="4"');
-    expect(markup).toContain("sub-agents");
-    expect(markup.match(/data-orb-index=/g)).toHaveLength(3);
+    expect(markup).toContain("Agent finished working");
+    expect(markup).toContain("1 tool call · 1 sub-agent");
+    expect(markup).toContain('data-subagent-count="1"');
+    expect(markup).not.toContain("thinking-orb-motion");
   });
 });

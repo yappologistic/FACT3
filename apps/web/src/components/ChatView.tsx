@@ -223,6 +223,11 @@ import {
 import { environmentShell } from "../state/shell";
 import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ComposerActivityStatus } from "./chat/ComposerActivityStatus";
+import {
+  deriveComposerActivityDetails,
+  deriveLatestComposerActivityTurnId,
+  deriveSubagentAssistantMessageIds,
+} from "./chat/composerActivityDetails";
 import { DraftHeroHeadline } from "./chat/DraftHeroHeadline";
 import { ExpandedImageDialog } from "./chat/ExpandedImageDialog";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -2035,8 +2040,12 @@ function ChatViewContent(props: ChatViewProps) {
   const sessionPhase = derivePhase(activeThread?.session ?? null);
   const phase = sessionPhase === "running" && latestTurnSettled ? "ready" : sessionPhase;
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  const latestActivityTurnId = useMemo(
+    () => deriveLatestComposerActivityTurnId(threadActivities),
+    [threadActivities],
+  );
   const activeActivityTurnId =
-    activeThread?.session?.activeTurnId ?? activeLatestTurn?.turnId ?? null;
+    activeThread?.session?.activeTurnId ?? activeLatestTurn?.turnId ?? latestActivityTurnId;
   const activeSubagentCount = useMemo(
     () => deriveActiveSubagentCount(threadActivities, activeActivityTurnId),
     [activeActivityTurnId, threadActivities],
@@ -2106,8 +2115,12 @@ function ChatViewContent(props: ChatViewProps) {
     [activeLatestTurn, activeThread?.id, latestTurnSettled, threadPlanCatalog],
   );
   const activePlan = useMemo(
-    () => deriveActivePlanState(threadActivities, activeLatestTurn?.turnId ?? undefined),
-    [activeLatestTurn?.turnId, threadActivities],
+    () => deriveActivePlanState(threadActivities, activeActivityTurnId ?? undefined),
+    [activeActivityTurnId, threadActivities],
+  );
+  const composerActivityDetails = useMemo(
+    () => deriveComposerActivityDetails(threadActivities, activeActivityTurnId, activePlan),
+    [activeActivityTurnId, activePlan, threadActivities],
   );
   const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
   const showPlanFollowUpPrompt =
@@ -2315,8 +2328,15 @@ function ChatViewContent(props: ChatViewProps) {
       }
     };
   }, [attachmentPreviewHandoffByMessageId, clearAttachmentPreviewHandoff, displayServerMessages]);
+  const subagentAssistantMessageIds = useMemo(
+    () => deriveSubagentAssistantMessageIds(threadActivities, activeActivityTurnId),
+    [activeActivityTurnId, threadActivities],
+  );
   const timelineMessages = useMemo(() => {
-    const messages = displayServerMessages;
+    const messages =
+      subagentAssistantMessageIds.size === 0
+        ? displayServerMessages
+        : displayServerMessages.filter((message) => !subagentAssistantMessageIds.has(message.id));
     const serverMessagesWithPreviewHandoff =
       Object.keys(attachmentPreviewHandoffByMessageId).length === 0
         ? messages
@@ -2366,7 +2386,12 @@ function ChatViewContent(props: ChatViewProps) {
       return serverMessagesWithPreviewHandoff;
     }
     return [...serverMessagesWithPreviewHandoff, ...pendingMessages];
-  }, [attachmentPreviewHandoffByMessageId, displayServerMessages, optimisticUserMessages]);
+  }, [
+    attachmentPreviewHandoffByMessageId,
+    displayServerMessages,
+    optimisticUserMessages,
+    subagentAssistantMessageIds,
+  ]);
   const timelineEntries = useMemo(
     () =>
       // Live tool activity belongs to the composer pill; keep the conversation timeline prose-only.
@@ -5880,11 +5905,19 @@ function ChatViewContent(props: ChatViewProps) {
                   {threadSyncPhase && !activeEnvironmentUnavailable ? (
                     <ThreadSyncStatusPill phase={threadSyncPhase} />
                   ) : null}
-                  {!isDraftHeroState && activeTurnInProgress ? (
+                  {!isDraftHeroState &&
+                  (activeTurnInProgress ||
+                    (latestTurnSettled && composerActivityDetails.hasHistory)) ? (
                     <div className="mx-auto w-full max-w-3xl">
                       <ComposerActivityStatus
                         activity={composerActivity}
                         activeSubagentCount={activeSubagentCount}
+                        {...(!activeLatestTurn || activeLatestTurn.state === "running"
+                          ? {}
+                          : { completionState: activeLatestTurn.state })}
+                        details={composerActivityDetails}
+                        isActive={activeTurnInProgress}
+                        key={activeActivityTurnId}
                         theme={resolvedTheme}
                       />
                     </div>

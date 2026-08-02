@@ -4,6 +4,7 @@
 
 - [Install and first run](./user/install.md)
 - [Permission modes](./user/permission-modes.md)
+- [Agent activity](./user/agent-activity.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [Appearance and color themes](./user/appearance.md)
 - [Remote access](./user/remote-access.md)

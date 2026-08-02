@@ -151,6 +151,26 @@ function projectRawOutput(value: unknown): Record<string, unknown> | undefined {
   return undefined;
 }
 
+function projectAssistantMessageData(
+  data: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const threadId = asTrimmedString(data.threadId);
+  const item = asRecord(data.item);
+  const itemId = asTrimmedString(item?.id);
+  const text = asTrimmedString(item?.text);
+  if (!threadId || !itemId || !text) {
+    return undefined;
+  }
+
+  return {
+    threadId,
+    item: {
+      id: itemId,
+      text: text.slice(0, 12_000),
+    },
+  };
+}
+
 /**
  * Removes activity payload fields that no current client reads while retaining
  * the full payload in persistence and the event store.
@@ -162,6 +182,19 @@ export function projectActivityPayload(
   const data = asRecord(payload?.data);
   if (!payload || !data || payload.itemType === "mcp_tool_call") {
     return activity;
+  }
+
+  if (activity.kind === "assistant.message.completed" && payload.itemType === "assistant_message") {
+    const assistantMessageData = projectAssistantMessageData(data);
+    return assistantMessageData
+      ? {
+          ...activity,
+          payload: {
+            itemType: "assistant_message",
+            data: assistantMessageData,
+          },
+        }
+      : activity;
   }
 
   const projectedData: Record<string, unknown> = {};

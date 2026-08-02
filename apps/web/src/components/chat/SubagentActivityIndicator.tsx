@@ -4,6 +4,7 @@ const MAX_VISIBLE_ORBS = 3;
 
 export const SubagentActivityIndicator = memo(function SubagentActivityIndicator(props: {
   readonly count: number;
+  readonly active?: boolean;
 }) {
   if (props.count <= 0) {
     return null;
@@ -31,6 +32,7 @@ export const SubagentActivityIndicator = memo(function SubagentActivityIndicator
       </span>
       <span className="whitespace-nowrap text-[11px] leading-none">
         {props.count === 1 ? "sub-agent" : "sub-agents"}
+        {props.active ? <span className="sr-only"> running</span> : null}
       </span>
     </span>
   );

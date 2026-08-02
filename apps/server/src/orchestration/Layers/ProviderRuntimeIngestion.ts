@@ -216,8 +216,12 @@ function buildCollabAgentActivitySnapshot(
 ):
   | {
       readonly tool?: string;
+      readonly prompt?: string;
       readonly receiverThreadIds?: ReadonlyArray<string>;
-      readonly agentsStates?: Readonly<Record<string, { readonly status: string }>>;
+      readonly agentPaths?: Readonly<Record<string, string>>;
+      readonly agentsStates?: Readonly<
+        Record<string, { readonly status: string; readonly message?: string }>
+      >;
     }
   | undefined {
   if (itemType !== "collab_agent_tool_call") {
@@ -241,6 +245,7 @@ function buildCollabAgentActivitySnapshot(
     return {
       tool: "spawnAgent",
       receiverThreadIds: [agentThreadId],
+      ...(agentPath ? { agentPaths: { [agentThreadId]: agentPath } } : {}),
       agentsStates: {
         [agentThreadId]: { status: kind === "interrupted" ? "interrupted" : "running" },
       },
@@ -248,27 +253,62 @@ function buildCollabAgentActivitySnapshot(
   }
 
   const tool = typeof item.tool === "string" ? item.tool : undefined;
+  const prompt = typeof item.prompt === "string" ? truncateDetail(item.prompt, 4_000) : undefined;
   const receiverThreadIds = Array.isArray(item.receiverThreadIds)
     ? item.receiverThreadIds.filter((value): value is string => typeof value === "string")
     : undefined;
   const rawAgentStates = asUnknownRecord(item.agentsStates);
-  const agentsStates: Record<string, { readonly status: string }> = {};
+  const agentsStates: Record<string, { readonly status: string; readonly message?: string }> = {};
   if (rawAgentStates) {
     for (const [agentId, rawState] of Object.entries(rawAgentStates)) {
-      const status = asUnknownRecord(rawState)?.status;
+      const stateRecord = asUnknownRecord(rawState);
+      const status = stateRecord?.status;
+      const message = stateRecord?.message;
       if (typeof status === "string") {
-        agentsStates[agentId] = { status };
+        agentsStates[agentId] = {
+          status,
+          ...(typeof message === "string" ? { message: truncateDetail(message, 4_000) } : {}),
+        };
       }
     }
   }
 
-  if (!tool && receiverThreadIds === undefined && Object.keys(agentsStates).length === 0) {
+  if (
+    !tool &&
+    !prompt &&
+    receiverThreadIds === undefined &&
+    Object.keys(agentsStates).length === 0
+  ) {
     return undefined;
   }
   return {
     ...(tool ? { tool } : {}),
+    ...(prompt ? { prompt } : {}),
     ...(receiverThreadIds !== undefined ? { receiverThreadIds } : {}),
     ...(Object.keys(agentsStates).length > 0 ? { agentsStates } : {}),
+  };
+}
+
+function buildAssistantMessageActivitySnapshot(data: unknown, fallbackText?: string) {
+  const dataRecord = asUnknownRecord(data);
+  const item = asUnknownRecord(dataRecord?.item);
+  const threadId = typeof dataRecord?.threadId === "string" ? dataRecord.threadId : undefined;
+  const messageId = typeof item?.id === "string" ? item.id : undefined;
+  const text =
+    typeof item?.text === "string"
+      ? item.text.trim()
+      : typeof fallbackText === "string"
+        ? fallbackText.trim()
+        : "";
+  if (!threadId || !messageId || text.length === 0) {
+    return undefined;
+  }
+  return {
+    threadId,
+    item: {
+      id: messageId,
+      text: truncateDetail(text, 12_000),
+    },
   };
 }
 
@@ -708,6 +748,30 @@ export function runtimeEventToActivities(
     }
 
     case "item.completed": {
+      if (event.payload.itemType === "assistant_message") {
+        const data = buildAssistantMessageActivitySnapshot(
+          event.payload.data,
+          event.payload.detail,
+        );
+        if (!data) {
+          return [];
+        }
+        return [
+          {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: "assistant.message.completed",
+            summary: "Assistant message",
+            payload: {
+              itemType: "assistant_message",
+              data,
+            },
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
