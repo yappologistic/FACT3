@@ -4,6 +4,7 @@ import {
   ACTIVITY_SECTION_ITEM_CLASS_NAME,
   ComposerActivityStatus,
   SubagentActivityRow,
+  TaskActivityRow,
   ToolActivityRow,
 } from "./ComposerActivityStatus";
 import { SubagentAvatar } from "./SubagentActivityIndicator";
@@ -19,6 +20,7 @@ const EMPTY_DETAILS: ComposerActivityDetails = {
 describe("ComposerActivityStatus", () => {
   it("keeps activity menu highlights concentric with the popup shell", () => {
     expect(ACTIVITY_SECTION_ITEM_CLASS_NAME).toContain("rounded-[16px]");
+    expect(ACTIVITY_SECTION_ITEM_CLASS_NAME).toContain("text-[12px]");
   });
 
   it("keeps the compact animated orb and opens activity details", () => {
@@ -179,6 +181,25 @@ describe("ComposerActivityStatus", () => {
       expect(markup).toContain(`lucide-${icon}`);
     }
     expect(markup).not.toContain("lucide-check");
+  });
+
+  it("makes every task expandable so its full text remains available", () => {
+    const markup = renderToStaticMarkup(
+      <TaskActivityRow
+        item={{
+          id: "task-1",
+          title:
+            "Read product contract, workspace instructions, repository status, and toolchain/test configuration",
+          status: "pending",
+          createdAt: "2026-08-02T00:00:00.000Z",
+        }}
+        theme="light"
+      />,
+    );
+
+    expect(markup).toContain("<button");
+    expect(markup).toContain('aria-expanded="false"');
+    expect(markup).toContain("lucide-chevron-right");
   });
 
   it("keeps a completed summary with persistent history", () => {

@@ -45,7 +45,10 @@ const ACTIVITY_SECTIONS: ReadonlyArray<{
   { value: "tasks", label: "Tasks", Icon: ListTodoIcon },
 ];
 
-export const ACTIVITY_SECTION_ITEM_CLASS_NAME = FLOATING_SQUIRCLE_ITEM_CLASS_NAME;
+export const ACTIVITY_SECTION_ITEM_CLASS_NAME = cn(
+  FLOATING_SQUIRCLE_ITEM_CLASS_NAME,
+  "text-[12px]",
+);
 
 function statusCopy(status: ComposerActivityItemStatus): string {
   switch (status) {
@@ -345,7 +348,7 @@ export const SubagentActivityRow = memo(function SubagentActivityRow(props: {
   );
 });
 
-const TaskActivityRow = memo(function TaskActivityRow(props: {
+export const TaskActivityRow = memo(function TaskActivityRow(props: {
   readonly item: ComposerTaskActivityItem;
   readonly theme: "light" | "dark";
 }) {
@@ -353,7 +356,7 @@ const TaskActivityRow = memo(function TaskActivityRow(props: {
   return (
     <ActivityRowShell
       {...(props.item.detail ? { detail: props.item.detail } : {})}
-      expandable={Boolean(props.item.detail)}
+      expandable
       expanded={expanded}
       leading={
         props.item.status === "running" ? (
@@ -371,11 +374,22 @@ const TaskActivityRow = memo(function TaskActivityRow(props: {
       status={props.item.status}
       title={props.item.title}
     >
-      {props.item.detail ? (
-        <div className="rounded-xl border border-border/45 bg-background/55 p-2.5 text-[11px] leading-4 text-foreground/75">
-          {props.item.detail}
+      <div className="space-y-2 rounded-xl border border-border/45 bg-background/55 p-2.5 text-[11px] leading-4">
+        <div>
+          <div className="mb-1 font-medium text-muted-foreground">Full task</div>
+          <div className="whitespace-pre-wrap break-words text-foreground/75">
+            {props.item.title}
+          </div>
         </div>
-      ) : null}
+        {props.item.detail ? (
+          <div className="border-t border-border/40 pt-2">
+            <div className="mb-1 font-medium text-muted-foreground">Details</div>
+            <div className="whitespace-pre-wrap break-words text-foreground/75">
+              {props.item.detail}
+            </div>
+          </div>
+        ) : null}
+      </div>
     </ActivityRowShell>
   );
 });
@@ -417,24 +431,17 @@ function ComposerActivityPanel(props: {
   const sectionDefinition =
     ACTIVITY_SECTIONS.find((candidate) => candidate.value === section) ?? ACTIVITY_SECTIONS[0]!;
   const SectionIcon = sectionDefinition.Icon;
-  const itemCount =
-    section === "tools"
-      ? props.details.tools.length
-      : section === "subagents"
-        ? props.details.subagents.length
-        : props.details.tasks.length;
-
   return (
     <div className="composer-activity-panel w-[min(38rem,calc(100vw-2rem))] overflow-hidden rounded-[34px] border">
       <PopoverTitle className="sr-only">Agent activity details</PopoverTitle>
-      <div className="flex min-h-12 items-center justify-between gap-3 px-3.5">
+      <div className="flex min-h-12 items-center gap-3 px-3.5">
         <Select
           onValueChange={(value) => value && setSection(value as ActivitySection)}
           value={section}
         >
           <SelectTrigger
             aria-label="Activity category"
-            className="-ml-1 min-h-8 w-auto min-w-36 rounded-[16px] border-transparent bg-transparent px-2 text-[13px] font-normal shadow-none before:hidden hover:bg-foreground/[0.045]"
+            className="-ml-1 min-h-8 w-auto min-w-36 rounded-[16px] border-transparent bg-transparent px-2 text-[12px] font-normal shadow-none before:hidden hover:bg-foreground/[0.045]"
             size="sm"
           >
             <SectionIcon aria-hidden className="size-3.5 text-muted-foreground" />
@@ -472,9 +479,6 @@ function ComposerActivityPanel(props: {
             })}
           </SelectPopup>
         </Select>
-        <span className="text-[11px] tabular-nums text-muted-foreground">
-          {props.isActive ? `${itemCount} live` : `${itemCount} total`}
-        </span>
       </div>
 
       <div className="mx-2 mb-2 overflow-hidden rounded-[28px] border border-border/55 bg-foreground/[0.025]">
