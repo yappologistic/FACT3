@@ -223,6 +223,9 @@ export const OrchestrationProjectAutomationPolicy = Schema.Struct({
   maxConcurrentRuns: PositiveInt.check(Schema.isLessThanOrEqualTo(8)),
   defaultMaxAttempts: PositiveInt.check(Schema.isLessThanOrEqualTo(5)),
   defaultMaxRuntimeMinutes: PositiveInt.check(Schema.isLessThanOrEqualTo(24 * 60)),
+  stuckAfterMinutes: PositiveInt.check(Schema.isLessThanOrEqualTo(24 * 60)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(15)),
+  ),
   createWorktrees: Schema.Boolean,
   requireVerification: Schema.Boolean,
   requireReview: Schema.Boolean,
@@ -245,6 +248,9 @@ export type OrchestrationAutomationStage = typeof OrchestrationAutomationStage.T
 export const OrchestrationAutomationPhase = Schema.Literals(["implementation", "verification"]);
 export type OrchestrationAutomationPhase = typeof OrchestrationAutomationPhase.Type;
 
+export const OrchestrationAutomationTaskKind = Schema.Literals(["implementation", "planning"]);
+export type OrchestrationAutomationTaskKind = typeof OrchestrationAutomationTaskKind.Type;
+
 export const OrchestrationAutomationVerification = Schema.Struct({
   status: Schema.Literals(["pending", "running", "passed", "failed"]),
   summary: Schema.NullOr(TrimmedNonEmptyString),
@@ -253,11 +259,17 @@ export const OrchestrationAutomationVerification = Schema.Struct({
 export type OrchestrationAutomationVerification = typeof OrchestrationAutomationVerification.Type;
 
 export const OrchestrationThreadAutomation = Schema.Struct({
+  taskKind: OrchestrationAutomationTaskKind.pipe(
+    Schema.withDecodingDefault(Effect.succeed("implementation" as const)),
+  ),
   goal: TrimmedNonEmptyString.check(Schema.isMaxLength(20_000)),
   acceptanceCriteria: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(2_000))).check(
     Schema.isMaxLength(24),
   ),
   dependencies: Schema.Array(ThreadId).check(Schema.isMaxLength(32)),
+  changeScopes: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(512)))
+    .check(Schema.isMaxLength(32))
+    .pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   baseBranch: TrimmedNonEmptyString,
   stage: OrchestrationAutomationStage,
   phase: OrchestrationAutomationPhase,

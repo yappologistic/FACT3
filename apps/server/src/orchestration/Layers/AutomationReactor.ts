@@ -12,6 +12,7 @@ import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
+import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -20,6 +21,7 @@ import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import { GitVcsDriver } from "../../vcs/GitVcsDriver.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
@@ -27,10 +29,20 @@ import { AutomationReactor, type AutomationReactorShape } from "../Services/Auto
 import {
   automationAvailableSlots,
   automationDispatchCompletion,
+  automationIsStalled,
+  automationStuckDeadline,
+  buildAutomationPrompt,
+  resolveAutomationDependencyBranches,
   selectRunnableAutomationTasks,
 } from "../AutomationReactor.logic.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+
+class AutomationDependencyMaterializationError extends Data.TaggedError(
+  "AutomationDependencyMaterializationError",
+)<{
+  readonly message: string;
+}> {}
 
 function hasBlockingRequest(thread: OrchestrationThread): boolean {
   const open = new Set<string>();
@@ -51,62 +63,15 @@ function hasBlockingRequest(thread: OrchestrationThread): boolean {
   return open.size > 0;
 }
 
-function buildAutomationPrompt(input: {
-  readonly thread: OrchestrationThread;
-  readonly project: OrchestrationProject;
-  readonly policy: OrchestrationProjectAutomationPolicy;
-}): string {
-  const automation = input.thread.automation!;
-  const criteria =
-    automation.acceptanceCriteria.length === 0
-      ? "- Preserve existing behavior and leave the repository in a verified state."
-      : automation.acceptanceCriteria.map((criterion) => `- ${criterion}`).join("\n");
-  const delivery =
-    input.policy.deliveryMode === "pull-request"
-      ? "Commit the finished work, push the task branch, and open a pull request. Do not merge it."
-      : input.policy.deliveryMode === "push-branch"
-        ? "Commit the finished work and push the task branch. Do not merge it."
-        : "Commit the finished work locally on the task branch. Do not push or merge it.";
-  const feedback = automation.feedback ? `\nReviewer feedback:\n${automation.feedback}\n` : "";
-
-  if (automation.phase === "verification") {
-    return [
-      "You are the verification pass for an autonomous FACT3 Kanban task.",
-      `Project: ${input.project.title}`,
-      `Goal: ${automation.goal}`,
-      "Acceptance criteria:",
-      criteria,
-      feedback,
-      "Inspect the implementation already present in this worktree. Run the smallest relevant tests and static checks, verify every acceptance criterion, and inspect the diff for regressions. Fix any issue you find and rerun the affected checks. Do not claim success without evidence.",
-      delivery,
-      "Finish with a concise report of checks run, results, files changed, and any remaining risk. If a required choice or permission is genuinely unavailable, ask one precise question instead of guessing.",
-    ]
-      .filter(Boolean)
-      .join("\n\n");
-  }
-
-  return [
-    "You are executing an autonomous FACT3 Kanban task in an isolated worktree.",
-    `Project: ${input.project.title}`,
-    `Goal: ${automation.goal}`,
-    "Acceptance criteria:",
-    criteria,
-    feedback,
-    "Own this task from investigation through implementation. Keep the change scoped to the goal, preserve unrelated user work, and use the repository's existing conventions. Run focused tests and static checks before finishing. Continue through recoverable issues without waiting for routine confirmation.",
-    delivery,
-    "Finish with a concise implementation summary, checks run, results, and any remaining risk. If a required choice or permission is genuinely unavailable, ask one precise question instead of guessing.",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-}
-
 const make = Effect.gen(function* () {
   const crypto = yield* Crypto.Crypto;
   const engine = yield* OrchestrationEngineService;
   const snapshots = yield* ProjectionSnapshotQuery;
   const gitWorkflow = yield* GitWorkflowService;
+  const git = yield* GitVcsDriver;
   const vcsStatus = yield* VcsStatusBroadcaster;
   const scheduledLeases = new Map<ThreadId, string>();
+  const scheduledStuckChecks = new Map<ThreadId, string>();
 
   const serverCommandId = (label: string) =>
     crypto.randomUUIDv4.pipe(
@@ -174,12 +139,50 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const scheduleStuckCheck = Effect.fn("AutomationReactor.scheduleStuckCheck")(function* (input: {
+    readonly thread: OrchestrationThread;
+    readonly policy: OrchestrationProjectAutomationPolicy;
+  }) {
+    const deadline = automationStuckDeadline(input);
+    if (!deadline) return;
+    if (scheduledStuckChecks.has(input.thread.id)) return;
+    scheduledStuckChecks.set(input.thread.id, deadline);
+    const currentTime = yield* DateTime.now;
+    const delayMs = Math.max(
+      0,
+      DateTime.toEpochMillis(DateTime.makeUnsafe(deadline)) - DateTime.toEpochMillis(currentTime),
+    );
+    yield* Effect.sleep(Duration.millis(delayMs)).pipe(
+      Effect.andThen(
+        Effect.sync(() => {
+          if (scheduledStuckChecks.get(input.thread.id) === deadline) {
+            scheduledStuckChecks.delete(input.thread.id);
+          }
+        }),
+      ),
+      Effect.andThen(Effect.suspend(() => enqueueProject?.(input.thread.projectId) ?? Effect.void)),
+      Effect.ensuring(
+        Effect.sync(() => {
+          if (scheduledStuckChecks.get(input.thread.id) === deadline) {
+            scheduledStuckChecks.delete(input.thread.id);
+          }
+        }),
+      ),
+      Effect.forkScoped,
+    );
+  });
+
   const prepareWorktree = Effect.fn("AutomationReactor.prepareWorktree")(function* (input: {
     readonly thread: OrchestrationThread;
     readonly project: OrchestrationProject;
     readonly policy: OrchestrationProjectAutomationPolicy;
   }) {
-    if (input.thread.worktreePath || !input.policy.createWorktrees) return;
+    if (
+      input.thread.worktreePath ||
+      !input.policy.createWorktrees ||
+      input.thread.automation?.taskKind === "planning"
+    )
+      return;
     const uuid = yield* crypto.randomUUIDv4.pipe(Effect.orDie);
     const branch = buildTemporaryWorktreeBranchName(() => uuid.replaceAll("-", ""));
     const worktree = yield* gitWorkflow.createWorktree({
@@ -189,6 +192,60 @@ const make = Effect.gen(function* () {
       baseRefName: input.thread.automation!.baseBranch,
       path: null,
     });
+    const model = yield* snapshots.getCommandReadModel();
+    const dependencies = resolveAutomationDependencyBranches({
+      thread: input.thread,
+      tasks: model.threads,
+    });
+    const cleanup = Effect.gen(function* () {
+      yield* git
+        .execute({
+          operation: "AutomationReactor.prepareWorktree.abortDependencyMerge",
+          cwd: worktree.worktree.path,
+          args: ["merge", "--abort"],
+          allowNonZeroExit: true,
+        })
+        .pipe(Effect.ignoreCause({ log: true }));
+      yield* gitWorkflow
+        .removeWorktree({
+          cwd: input.project.workspaceRoot,
+          path: worktree.worktree.path,
+          force: true,
+        })
+        .pipe(Effect.ignoreCause({ log: true }));
+      yield* git
+        .execute({
+          operation: "AutomationReactor.prepareWorktree.removeFailedBranch",
+          cwd: input.project.workspaceRoot,
+          args: ["branch", "-D", worktree.worktree.refName],
+          allowNonZeroExit: true,
+        })
+        .pipe(Effect.ignoreCause({ log: true }));
+    });
+    if (dependencies.missing.length > 0) {
+      yield* cleanup;
+      return yield* new AutomationDependencyMaterializationError({
+        message: `Approved dependency output is unavailable for: ${dependencies.missing.join(", ")}. Reopen those tasks before retrying.`,
+      });
+    }
+    yield* Effect.forEach(
+      dependencies.branches,
+      (branch) =>
+        git.execute({
+          operation: "AutomationReactor.prepareWorktree.mergeDependency",
+          cwd: worktree.worktree.path,
+          args: [
+            "-c",
+            "user.name=FACT3 Code",
+            "-c",
+            "user.email=fact3@localhost",
+            "merge",
+            "--no-edit",
+            branch,
+          ],
+        }),
+      { discard: true },
+    ).pipe(Effect.catchCause((cause) => cleanup.pipe(Effect.andThen(Effect.failCause(cause)))));
     yield* engine.dispatch({
       type: "thread.meta.update",
       commandId: yield* serverCommandId("worktree"),
@@ -286,6 +343,7 @@ const make = Effect.gen(function* () {
       },
     };
     yield* scheduleLease(transitionedThread);
+    yield* scheduleStuckCheck({ thread: transitionedThread, policy: input.policy });
     yield* engine.dispatch({
       type: "thread.turn.start",
       commandId: yield* serverCommandId(`turn-${input.phase}`),
@@ -299,7 +357,7 @@ const make = Effect.gen(function* () {
       modelSelection: input.thread.modelSelection,
       titleSeed: input.thread.title,
       runtimeMode: input.thread.runtimeMode,
-      interactionMode: "default",
+      interactionMode: input.thread.interactionMode,
       createdAt: startedAt,
     });
   });
@@ -309,7 +367,8 @@ const make = Effect.gen(function* () {
     readonly policy: OrchestrationProjectAutomationPolicy;
   }) {
     const completedAt = yield* nowIso;
-    const stage = input.policy.requireReview ? "review" : "complete";
+    const planning = input.thread.automation?.taskKind === "planning";
+    const stage = planning || input.policy.requireReview ? "review" : "complete";
     yield* transition({
       thread: input.thread,
       stage,
@@ -317,7 +376,9 @@ const make = Effect.gen(function* () {
       completedAt,
       verification: {
         status: "passed",
-        summary: "The autonomous verification turn completed successfully.",
+        summary: planning
+          ? "The project plan is ready for approval."
+          : "The autonomous verification turn completed successfully.",
         completedAt,
       },
     });
@@ -395,11 +456,32 @@ const make = Effect.gen(function* () {
       }
       if (automation.stage !== "running") continue;
       yield* scheduleLease(thread);
+      yield* scheduleStuckCheck({ thread, policy });
       if (hasBlockingRequest(thread)) {
         yield* transition({ thread, stage: "needs-input" });
         continue;
       }
       const currentTime = yield* DateTime.now;
+      const currentIso = DateTime.formatIso(currentTime);
+      if (automationIsStalled({ thread, policy, now: currentIso })) {
+        if (thread.session?.status === "running") {
+          yield* engine.dispatch({
+            type: "thread.turn.interrupt",
+            commandId: yield* serverCommandId("stalled"),
+            threadId: thread.id,
+            ...(thread.session.activeTurnId ? { turnId: thread.session.activeTurnId } : {}),
+            createdAt: currentIso,
+          });
+        }
+        yield* transition({
+          thread,
+          stage: "failed",
+          leaseExpiresAt: null,
+          lastError: `No agent activity was recorded for ${policy.stuckAfterMinutes} minutes. The run was stopped so it could not block the board.`,
+          completedAt: currentIso,
+        });
+        continue;
+      }
       if (
         automation.leaseExpiresAt &&
         DateTime.toEpochMillis(DateTime.makeUnsafe(automation.leaseExpiresAt)) <=
@@ -449,7 +531,11 @@ const make = Effect.gen(function* () {
         });
         continue;
       }
-      if (automation.phase === "implementation" && policy.requireVerification) {
+      if (
+        automation.taskKind !== "planning" &&
+        automation.phase === "implementation" &&
+        policy.requireVerification
+      ) {
         yield* dispatchRun({
           thread,
           project,

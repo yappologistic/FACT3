@@ -43,6 +43,7 @@ export const DEFAULT_AUTOMATION_POLICY: OrchestrationProjectAutomationPolicy = {
   maxConcurrentRuns: 3,
   defaultMaxAttempts: 2,
   defaultMaxRuntimeMinutes: 120,
+  stuckAfterMinutes: 15,
   createWorktrees: true,
   requireVerification: true,
   requireReview: true,
@@ -77,6 +78,7 @@ export function KanbanNewTaskDialog(props: {
   const [title, setTitle] = useState("");
   const [goal, setGoal] = useState("");
   const [criteria, setCriteria] = useState("");
+  const [changeScopes, setChangeScopes] = useState("");
   const [baseBranch, setBaseBranch] = useState(props.baseBranch);
   const [dependencies, setDependencies] = useState<ReadonlySet<ThreadId>>(new Set());
   const [maxAttempts, setMaxAttempts] = useState(
@@ -91,10 +93,7 @@ export function KanbanNewTaskDialog(props: {
   const dependencyOptions = useMemo(
     () =>
       props.threads.filter(
-        (thread) =>
-          thread.automation !== undefined &&
-          thread.automation.stage !== "cancelled" &&
-          thread.automation.stage !== "complete",
+        (thread) => thread.automation !== undefined && thread.automation.stage !== "cancelled",
       ),
     [props.threads],
   );
@@ -109,6 +108,7 @@ export function KanbanNewTaskDialog(props: {
     setTitle("");
     setGoal("");
     setCriteria("");
+    setChangeScopes("");
     setBaseBranch(props.baseBranch);
     setDependencies(new Set());
     setMaxAttempts(
@@ -151,12 +151,17 @@ export function KanbanNewTaskDialog(props: {
       input: {
         threadId,
         automation: {
+          taskKind: "implementation",
           goal: goal.trim(),
           acceptanceCriteria: criteria
             .split("\n")
             .map((item) => item.trim().replace(/^[-*]\s*/, ""))
             .filter(Boolean),
           dependencies: [...dependencies],
+          changeScopes: changeScopes
+            .split("\n")
+            .map((item) => item.trim())
+            .filter(Boolean),
           baseBranch: baseBranch.trim(),
           stage: "ready",
           phase: "implementation",
@@ -292,6 +297,21 @@ export function KanbanNewTaskDialog(props: {
                   onChange={(event) => setBaseBranch(event.target.value)}
                 />
               </div>
+              <div className="sm:col-span-3">
+                <FieldLabel htmlFor="kanban-task-change-scopes">Likely paths</FieldLabel>
+                <Textarea
+                  id="kanban-task-change-scopes"
+                  value={changeScopes}
+                  onChange={(event) => setChangeScopes(event.target.value)}
+                  placeholder={
+                    "One relative path or glob per line\napps/web/src/components/settings/**"
+                  }
+                  className="min-h-16"
+                />
+                <p className="mt-1 text-[10px] leading-4 text-muted-foreground/62">
+                  Autopilot keeps overlapping paths out of the same parallel run.
+                </p>
+              </div>
               <div>
                 <FieldLabel htmlFor="kanban-task-attempts">Attempts</FieldLabel>
                 <Input
@@ -401,7 +421,7 @@ export function KanbanAutomationSettingsDialog(props: {
           </DialogDescription>
         </DialogHeader>
         <DialogPanel className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <FieldLabel htmlFor="kanban-policy-concurrency">Parallel runs</FieldLabel>
               <Input
@@ -439,6 +459,23 @@ export function KanbanAutomationSettingsDialog(props: {
                   <SelectItem value="pull-request">Pull request</SelectItem>
                 </SelectPopup>
               </Select>
+            </div>
+            <div>
+              <FieldLabel htmlFor="kanban-policy-stuck">Stuck after (minutes)</FieldLabel>
+              <Input
+                id="kanban-policy-stuck"
+                nativeInput
+                type="number"
+                min={2}
+                max={1440}
+                value={policy.stuckAfterMinutes}
+                onChange={(event) =>
+                  setPolicy((current) => ({
+                    ...current,
+                    stuckAfterMinutes: Math.max(2, Math.min(1440, Number(event.target.value) || 2)),
+                  }))
+                }
+              />
             </div>
           </div>
 

@@ -3,6 +3,8 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  automationConflictBlockers,
+  capCompletedKanbanThreads,
   classifyKanbanThread,
   describeEmptyKanbanActivity,
   describeKanbanThreadState,
@@ -11,6 +13,7 @@ import {
   incompleteAutomationDependencies,
   latestCheckpointSummary,
   liveKanbanAutomation,
+  parseAutomationPlan,
 } from "./KanbanBoard.logic";
 
 const NOW = "2026-08-03T10:00:00.000Z";
@@ -46,9 +49,11 @@ function thread(
 
 function automation(): NonNullable<EnvironmentThreadShell["automation"]> {
   return {
+    taskKind: "implementation",
     goal: "Ship the board",
     acceptanceCriteria: [],
     dependencies: [],
+    changeScopes: [],
     baseBranch: "main",
     stage: "ready",
     phase: "implementation",
@@ -70,9 +75,11 @@ function automation(): NonNullable<EnvironmentThreadShell["automation"]> {
 describe("Kanban board lifecycle", () => {
   it("prefers the live shell automation over a stale cached detail", () => {
     const stale = {
+      taskKind: "implementation" as const,
       goal: "Ship the board",
       acceptanceCriteria: [],
       dependencies: [],
+      changeScopes: [],
       baseBranch: "main",
       stage: "running" as const,
       phase: "verification" as const,
@@ -104,9 +111,11 @@ describe("Kanban board lifecycle", () => {
 
   it("maps durable automation stages to purposeful board lanes", () => {
     const automation = {
+      taskKind: "implementation" as const,
       goal: "Ship the board",
       acceptanceCriteria: [],
       dependencies: [],
+      changeScopes: [],
       baseBranch: "main",
       phase: "implementation" as const,
       attempt: 0,
@@ -145,9 +154,11 @@ describe("Kanban board lifecycle", () => {
     const dependency = thread({
       id: ThreadId.make("dependency"),
       automation: {
+        taskKind: "implementation",
         goal: "Build dependency",
         acceptanceCriteria: [],
         dependencies: [],
+        changeScopes: ["apps/web/src/components"],
         baseBranch: "main",
         stage: "running",
         phase: "implementation",
@@ -186,6 +197,31 @@ describe("Kanban board lifecycle", () => {
     expect(incompleteAutomationDependencies(dependent, [completedDependency, dependent])).toEqual(
       [],
     );
+  });
+
+  it("identifies scope conflicts only against active work", () => {
+    const active = thread({
+      id: ThreadId.make("active-scope"),
+      automation: {
+        ...automation(),
+        stage: "running",
+        changeScopes: ["apps/web/src/components"],
+      },
+    });
+    const queued = thread({
+      id: ThreadId.make("queued-scope"),
+      automation: {
+        ...automation(),
+        changeScopes: ["apps/web/src/components/kanban/**"],
+      },
+    });
+    expect(automationConflictBlockers(queued, [active, queued])).toEqual([active]);
+    expect(
+      automationConflictBlockers(
+        { ...queued, automation: { ...queued.automation!, stage: "planned" } },
+        [active],
+      ),
+    ).toEqual([]);
   });
 
   it("keeps live and waiting threads in Running", () => {
@@ -230,6 +266,57 @@ describe("Kanban board lifecycle", () => {
 });
 
 describe("Kanban board summaries", () => {
+  it("decodes a valid AI project plan and rejects dependency cycles", () => {
+    const valid = {
+      summary: "Ship the autonomous board in two safe slices.",
+      tasks: [
+        {
+          key: "contracts",
+          title: "Add contracts",
+          goal: "Define the durable data model.",
+          acceptanceCriteria: ["Contract tests pass"],
+          dependsOn: [],
+          changeScopes: ["packages/contracts/src/**"],
+          model: "gpt-5.6-sol",
+          reasoningEffort: "high",
+          verification: ["vp test run packages/contracts/src/orchestration.test.ts"],
+        },
+        {
+          key: "ui",
+          title: "Build the board UI",
+          goal: "Render the new workflow.",
+          acceptanceCriteria: ["Focused UI tests pass"],
+          dependsOn: ["contracts"],
+          changeScopes: ["apps/web/src/components/kanban/**"],
+          model: "gpt-5.6-terra",
+          reasoningEffort: "medium",
+          verification: ["vp test run apps/web/src/components/kanban"],
+        },
+      ],
+    };
+    expect(
+      parseAutomationPlan(`Plan ready.\n\`\`\`json\n${JSON.stringify(valid)}\n\`\`\``),
+    ).toEqual(valid);
+    const cyclic = {
+      ...valid,
+      tasks: valid.tasks.map((task, index) => ({
+        ...task,
+        dependsOn: [valid.tasks[index === 0 ? 1 : 0]!.key],
+      })),
+    };
+    expect(parseAutomationPlan(JSON.stringify(cyclic))).toBeNull();
+  });
+
+  it("caps Done without losing access to older completed work", () => {
+    const completed = Array.from({ length: 6 }, (_, index) =>
+      thread({ id: ThreadId.make(`done-${index}`), updatedAt: `2026-08-03T09:0${index}:00.000Z` }),
+    );
+    expect(capCompletedKanbanThreads(completed, 4)).toEqual({
+      visible: completed.slice(0, 4),
+      overflow: completed.slice(4),
+    });
+  });
+
   it("summarizes the latest checkpoint", () => {
     expect(
       latestCheckpointSummary([

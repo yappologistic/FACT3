@@ -5,6 +5,7 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationProjectAutomationPolicy,
+  type OrchestrationProject,
   type OrchestrationThread,
   type OrchestrationThreadAutomation,
 } from "@t3tools/contracts";
@@ -13,8 +14,13 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   automationAvailableSlots,
   automationCanRetry,
+  automationConflictBlockers,
   automationConcurrencyLimit,
   automationDispatchCompletion,
+  automationIsStalled,
+  automationStuckDeadline,
+  buildAutomationPrompt,
+  resolveAutomationDependencyBranches,
   selectRunnableAutomationTasks,
 } from "./AutomationReactor.logic.ts";
 
@@ -24,6 +30,7 @@ const policy: OrchestrationProjectAutomationPolicy = {
   maxConcurrentRuns: 3,
   defaultMaxAttempts: 2,
   defaultMaxRuntimeMinutes: 60,
+  stuckAfterMinutes: 15,
   createWorktrees: true,
   requireVerification: true,
   requireReview: true,
@@ -36,6 +43,9 @@ function task(input: {
   readonly dependencies?: ReadonlyArray<ThreadId>;
   readonly attempt?: number;
   readonly maxAttempts?: number;
+  readonly changeScopes?: ReadonlyArray<string>;
+  readonly taskKind?: OrchestrationThreadAutomation["taskKind"];
+  readonly branch?: string | null;
 }): OrchestrationThread {
   const id = ThreadId.make(input.id);
   return {
@@ -45,7 +55,7 @@ function task(input: {
     modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
     runtimeMode: "full-access",
     interactionMode: "default",
-    branch: "main",
+    branch: input.branch === undefined ? "main" : input.branch,
     worktreePath: null,
     latestTurn: null,
     createdAt: NOW,
@@ -62,9 +72,11 @@ function task(input: {
     checkpoints: [],
     session: null,
     automation: {
+      taskKind: input.taskKind ?? "implementation",
       goal: input.id,
       acceptanceCriteria: [],
       dependencies: input.dependencies ?? [],
+      changeScopes: input.changeScopes ?? [],
       baseBranch: "main",
       stage: input.stage,
       phase: "implementation",
@@ -85,6 +97,42 @@ function task(input: {
 }
 
 describe("automation scheduler decisions", () => {
+  it("materializes approved dependency branches in declared order", () => {
+    const first = task({ id: "first", stage: "complete", branch: "t3code/first" });
+    const second = task({ id: "second", stage: "complete", branch: "t3code/second" });
+    const duplicate = task({ id: "duplicate", stage: "complete", branch: "t3code/first" });
+    const alreadyOnBase = task({ id: "base", stage: "complete", branch: "main" });
+    const dependent = task({
+      id: "dependent",
+      stage: "ready",
+      dependencies: [first.id, second.id, duplicate.id, alreadyOnBase.id],
+    });
+
+    expect(
+      resolveAutomationDependencyBranches({
+        thread: dependent,
+        tasks: [dependent, second, alreadyOnBase, first, duplicate],
+      }),
+    ).toEqual({ branches: ["t3code/first", "t3code/second"], missing: [] });
+  });
+
+  it("reports dependency output that cannot be materialized", () => {
+    const missingBranch = task({ id: "missing branch", stage: "complete", branch: null });
+    const unfinished = task({ id: "unfinished", stage: "review", branch: "t3code/review" });
+    const dependent = task({
+      id: "dependent",
+      stage: "ready",
+      dependencies: [missingBranch.id, unfinished.id, ThreadId.make("unknown")],
+    });
+
+    expect(
+      resolveAutomationDependencyBranches({
+        thread: dependent,
+        tasks: [dependent, missingBranch, unfinished],
+      }),
+    ).toEqual({ branches: [], missing: ["missing branch", "unfinished", "unknown"] });
+  });
+
   it("forces serial execution without worktrees", () => {
     expect(automationConcurrencyLimit({ ...policy, createWorktrees: false })).toBe(1);
     expect(
@@ -128,6 +176,108 @@ describe("automation scheduler decisions", () => {
         availableSlots: 1,
       }).map((candidate) => candidate.id),
     ).toEqual([blockedByComplete.id]);
+  });
+
+  it("keeps overlapping change scopes out of the same parallel batch", () => {
+    const active = task({
+      id: "active-web",
+      stage: "running",
+      changeScopes: ["apps/web/src/components"],
+    });
+    const conflicting = task({
+      id: "conflicting-web",
+      stage: "ready",
+      changeScopes: ["apps/web/src/components/kanban/**"],
+    });
+    const independent = task({
+      id: "independent-server",
+      stage: "ready",
+      changeScopes: ["apps/server/src/**"],
+    });
+
+    expect(automationConflictBlockers(conflicting, [active])).toEqual([active]);
+    expect(
+      selectRunnableAutomationTasks({
+        tasks: [active, conflicting, independent],
+        availableSlots: 2,
+      }).map((candidate) => candidate.id),
+    ).toEqual([independent.id]);
+  });
+
+  it("does not dispatch two conflicting ready tasks in one scheduling pass", () => {
+    const first = task({ id: "first", stage: "ready", changeScopes: ["packages/contracts"] });
+    const second = task({
+      id: "second",
+      stage: "ready",
+      changeScopes: ["packages/contracts/src/orchestration.ts"],
+    });
+
+    expect(
+      selectRunnableAutomationTasks({ tasks: [first, second], availableSlots: 2 }).map(
+        (candidate) => candidate.id,
+      ),
+    ).toEqual([first.id]);
+  });
+
+  it("detects a silent run from its latest durable progress timestamp", () => {
+    const running = task({ id: "silent", stage: "running" });
+    const withHeartbeat: OrchestrationThread = {
+      ...running,
+      session: {
+        threadId: running.id,
+        status: "running",
+        providerName: "Codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: "2026-08-03T12:04:00.000Z",
+      },
+      automation: {
+        ...running.automation!,
+        startedAt: "2026-08-03T12:00:00.000Z",
+        lastHeartbeatAt: "2026-08-03T12:04:00.000Z",
+      },
+    };
+
+    expect(automationStuckDeadline({ thread: withHeartbeat, policy })).toBe(
+      "2026-08-03T12:19:00.000Z",
+    );
+    expect(
+      automationIsStalled({
+        thread: withHeartbeat,
+        policy,
+        now: "2026-08-03T12:18:59.999Z",
+      }),
+    ).toBe(false);
+    expect(
+      automationIsStalled({
+        thread: withHeartbeat,
+        policy,
+        now: "2026-08-03T12:19:00.000Z",
+      }),
+    ).toBe(true);
+  });
+
+  it("gives planning tasks a read-only structured-output contract", () => {
+    const planning = task({ id: "project-plan", stage: "running", taskKind: "planning" });
+    const project: OrchestrationProject = {
+      id: planning.projectId,
+      title: "FACT3",
+      workspaceRoot: "D:/FACT3",
+      repositoryIdentity: null,
+      defaultModelSelection: planning.modelSelection,
+      scripts: [],
+      automationPolicy: policy,
+      createdAt: NOW,
+      updatedAt: NOW,
+      deletedAt: null,
+    };
+    const prompt = buildAutomationPrompt({ thread: planning, project, policy });
+    expect(prompt).toContain("Inspect the repository read-only");
+    expect(prompt).toContain('"changeScopes"');
+    expect(prompt).toContain('"reasoningEffort"');
+    expect(prompt).toContain("Do not edit files, commit, push, or open a pull request.");
   });
 
   it("stops retrying exactly at the configured attempt budget", () => {

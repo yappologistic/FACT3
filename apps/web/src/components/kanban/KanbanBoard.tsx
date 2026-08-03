@@ -3,7 +3,12 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import type { ModelSelection, OrchestrationAutomationStage } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  OrchestrationAutomationStage,
+  ServerProvider,
+} from "@t3tools/contracts";
+import { useAtomValue } from "@effect/atom-react";
 import {
   AlertTriangleIcon,
   ArchiveRestoreIcon,
@@ -22,6 +27,7 @@ import {
   RotateCcwIcon,
   Settings2Icon,
   ShieldCheckIcon,
+  SparklesIcon,
   XCircleIcon,
   XIcon,
 } from "lucide-react";
@@ -46,12 +52,15 @@ import { ScrollArea } from "~/components/ui/scroll-area";
 import { Textarea } from "~/components/ui/textarea";
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { useThreadActions } from "~/hooks/useThreadActions";
-import { cn } from "~/lib/utils";
+import { useCheckpointDiff } from "~/lib/checkpointDiffState";
+import { getDiffLineStat, getRenderablePatch, resolveFileDiffPath } from "~/lib/diffRendering";
+import { cn, newThreadId } from "~/lib/utils";
 import { deriveActivePlanState } from "~/session-logic";
 import { useThread } from "~/state/entities";
 import { projectEnvironment } from "~/state/projects";
 import { useEnvironmentQuery } from "~/state/query";
 import { threadEnvironment } from "~/state/threads";
+import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { vcsEnvironment } from "~/state/vcs";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
@@ -60,16 +69,20 @@ import {
   KanbanAutomationSettingsDialog,
   KanbanNewTaskDialog,
 } from "./KanbanAutomationDialogs";
+import { KanbanProjectGoalDialog } from "./KanbanProjectGoalDialog";
 import {
+  automationConflictBlockers,
+  capCompletedKanbanThreads,
   classifyKanbanThread,
   describeKanbanThreadState,
   describeEmptyKanbanActivity,
   firstUserGoal,
   groupKanbanThreads,
   incompleteAutomationDependencies,
-  latestCheckpointSummary,
   liveKanbanAutomation,
+  parseAutomationPlan,
   sortKanbanThreads,
+  type AutomationPlanTask,
   type KanbanActiveLane,
 } from "./KanbanBoard.logic";
 import { OpenTuiSpinner } from "./OpenTuiSpinner";
@@ -114,6 +127,34 @@ function compactModelLabel(model: string): string {
     });
 }
 
+function resolvePlanModelSelection(
+  task: AutomationPlanTask,
+  providers: ReadonlyArray<ServerProvider>,
+  fallback: ModelSelection,
+): ModelSelection | null {
+  const provider = providers.find(
+    (candidate) =>
+      candidate.enabled &&
+      candidate.installed &&
+      candidate.availability !== "unavailable" &&
+      candidate.models.some((model) => model.slug === task.model),
+  );
+  if (!provider) return task.model === fallback.model ? fallback : null;
+  const effortOptionId = provider.driver.toLowerCase().includes("claude")
+    ? "effort"
+    : "reasoningEffort";
+  const fallbackOptions =
+    provider.instanceId === fallback.instanceId ? (fallback.options ?? []) : [];
+  return {
+    instanceId: provider.instanceId,
+    model: task.model,
+    options: [
+      ...fallbackOptions.filter((option) => option.id !== effortOptionId),
+      { id: effortOptionId, value: task.reasoningEffort },
+    ],
+  };
+}
+
 function stateLabelForThread(
   thread: EnvironmentThreadShell,
   allThreads: ReadonlyArray<EnvironmentThreadShell>,
@@ -121,6 +162,10 @@ function stateLabelForThread(
   const blocked = incompleteAutomationDependencies(thread, allThreads);
   if (thread.automation?.stage === "ready" && blocked.length > 0) {
     return `Blocked by ${blocked.length} ${blocked.length === 1 ? "task" : "tasks"}`;
+  }
+  const conflicts = automationConflictBlockers(thread, allThreads);
+  if (conflicts.length > 0) {
+    return `Waiting for ${conflicts[0]!.title}`;
   }
   return describeKanbanThreadState(thread);
 }
@@ -162,7 +207,11 @@ const KanbanCard = memo(function KanbanCard(props: {
   const stateLabel = stateLabelForThread(props.thread, props.allThreads);
   const quietStateLabel =
     props.lane === "history"
-      ? `Archived ${formatRelativeTimeLabel(props.thread.archivedAt ?? props.thread.updatedAt)}`
+      ? props.thread.archivedAt
+        ? `Archived ${formatRelativeTimeLabel(props.thread.archivedAt)}`
+        : `Completed ${formatRelativeTimeLabel(
+            props.thread.automation?.completedAt ?? props.thread.updatedAt,
+          )}`
       : props.lane === "complete" && props.thread.automation?.stage !== "cancelled"
         ? `Completed ${formatRelativeTimeLabel(
             props.thread.automation?.completedAt ?? props.thread.updatedAt,
@@ -193,7 +242,11 @@ const KanbanCard = memo(function KanbanCard(props: {
             props.lane === "attention" && "text-warning",
           )}
         >
-          <BotIcon aria-hidden className="size-3.5" />
+          {props.thread.automation?.taskKind === "planning" ? (
+            <SparklesIcon aria-hidden className="size-3.5" />
+          ) : (
+            <BotIcon aria-hidden className="size-3.5" />
+          )}
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex min-w-0 items-start gap-2">
@@ -243,14 +296,20 @@ const KanbanLaneColumn = memo(function KanbanLaneColumn(props: {
   readonly lane: KanbanActiveLane;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly allThreads: ReadonlyArray<EnvironmentThreadShell>;
+  readonly compact: boolean;
+  readonly hiddenCount?: number;
   readonly selectedKey: string | null;
   readonly onSelect: (thread: EnvironmentThreadShell) => void;
+  readonly onShowHistory: () => void;
 }) {
   const copy = LANE_COPY[props.lane];
   return (
     <section
       aria-labelledby={`kanban-${props.lane}-heading`}
-      className="flex min-h-0 min-w-[16.5rem] flex-1 flex-col rounded-[20px] border border-foreground/[0.055] bg-foreground/[0.018] p-2.5"
+      className={cn(
+        "flex min-h-0 flex-col rounded-[20px] border border-foreground/[0.055] bg-foreground/[0.018] p-2.5 transition-[min-width,flex-basis,background-color] duration-200 motion-reduce:transition-none",
+        props.compact ? "min-w-[9.5rem] flex-[0_0_9.5rem]" : "min-w-[16.5rem] flex-1",
+      )}
     >
       <header className="mb-2.5 flex items-center justify-between gap-3 px-1">
         <div className="flex min-w-0 items-center gap-2">
@@ -266,10 +325,16 @@ const KanbanLaneColumn = memo(function KanbanLaneColumn(props: {
         </div>
         <span className="sr-only">{copy.description}</span>
       </header>
-      <ScrollArea className="min-h-0 flex-1 pr-1.5">
+      <ScrollArea className={cn("min-h-0 flex-1", !props.compact && "pr-1.5")}>
         <div className="space-y-2.5 pb-4">
           {props.threads.length === 0 ? (
-            <LaneEmptyState lane={props.lane} />
+            props.compact ? (
+              <p className="px-1 py-3 text-[10px] leading-4 text-muted-foreground/55">
+                {props.lane === "attention" ? "No blockers" : "No work here"}
+              </p>
+            ) : (
+              <LaneEmptyState lane={props.lane} />
+            )
           ) : (
             props.threads.map((thread) => (
               <KanbanCard
@@ -282,6 +347,17 @@ const KanbanLaneColumn = memo(function KanbanLaneColumn(props: {
               />
             ))
           )}
+          {props.hiddenCount ? (
+            <Button
+              variant="ghost"
+              size="xs"
+              className="w-full justify-center text-muted-foreground"
+              onClick={props.onShowHistory}
+            >
+              <HistoryIcon aria-hidden className="size-3.5" />
+              {props.hiddenCount} more in History
+            </Button>
+          ) : null}
         </div>
       </ScrollArea>
     </section>
@@ -352,6 +428,7 @@ function RequestChangesDialog(props: {
 }
 
 function KanbanInspector(props: {
+  readonly project: EnvironmentProject;
   readonly threadShell: EnvironmentThreadShell;
   readonly allThreads: ReadonlyArray<EnvironmentThreadShell>;
   readonly lane: KanbanActiveLane | "history";
@@ -368,9 +445,40 @@ function KanbanInspector(props: {
   const transitionAutomation = useAtomCommand(threadEnvironment.transitionAutomation, {
     reportFailure: false,
   });
+  const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
+  const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
+  const configureThreadAutomation = useAtomCommand(threadEnvironment.configureAutomation, {
+    reportFailure: false,
+  });
+  const configureProjectAutomation = useAtomCommand(projectEnvironment.configureAutomation, {
+    reportFailure: false,
+  });
+  const serverConfig = useAtomValue(
+    serverEnvironment.configValueAtom(props.threadShell.environmentId),
+  );
   const [lifecyclePending, setLifecyclePending] = useState(false);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const automation = liveKanbanAutomation(props.threadShell, thread);
+  const policy = props.project.automationPolicy ?? DEFAULT_AUTOMATION_POLICY;
+  const proposedExecution = useMemo(() => {
+    if (automation?.taskKind !== "planning" || !thread) return null;
+    const assistant = thread.messages
+      .toReversed()
+      .find((message) => message.role === "assistant" && !message.streaming && message.text.trim());
+    const proposedPlan = thread.proposedPlans.toReversed().find((plan) => !plan.implementedAt);
+    return parseAutomationPlan(assistant?.text ?? proposedPlan?.planMarkdown ?? "");
+  }, [automation?.taskKind, thread]);
+  const proposedModelSelections = useMemo(
+    () =>
+      proposedExecution?.tasks.map((task) =>
+        resolvePlanModelSelection(
+          task,
+          serverConfig?.providers ?? [],
+          props.threadShell.modelSelection,
+        ),
+      ) ?? [],
+    [proposedExecution, props.threadShell.modelSelection, serverConfig?.providers],
+  );
   const gitCwd = thread?.worktreePath ?? props.threadShell.worktreePath;
   const gitStatus = useEnvironmentQuery(
     gitCwd
@@ -392,12 +500,21 @@ function KanbanInspector(props: {
     () => deriveComposerActivityDetails(thread?.activities ?? [], activityTurnId, activePlan),
     [activePlan, activityTurnId, thread?.activities],
   );
-  const checkpoint = useMemo(
-    () => latestCheckpointSummary(thread?.checkpoints ?? []),
-    [thread?.checkpoints],
+  const latestCheckpoint = thread?.checkpoints.at(-1) ?? null;
+  const fullThreadDiff = useCheckpointDiff(
+    {
+      environmentId: props.threadShell.environmentId,
+      threadId: props.threadShell.id,
+      fromTurnCount: latestCheckpoint === null ? null : 0,
+      toTurnCount: latestCheckpoint?.checkpointTurnCount ?? null,
+      ignoreWhitespace: false,
+      cacheScope: `kanban:${props.threadShell.id}`,
+    },
+    { enabled: automation?.taskKind !== "planning" },
   );
   const goal = automation?.goal ?? firstUserGoal(thread?.messages ?? []);
   const blockedDependencies = incompleteAutomationDependencies(props.threadShell, props.allThreads);
+  const conflictBlockers = automationConflictBlockers(props.threadShell, props.allThreads);
   const dependencyById = useMemo(
     () => new Map(props.allThreads.map((candidate) => [candidate.id, candidate])),
     [props.allThreads],
@@ -410,6 +527,18 @@ function KanbanInspector(props: {
       [],
     [thread?.checkpoints],
   );
+  const fullThreadFiles = useMemo(() => {
+    const patch = getRenderablePatch(fullThreadDiff.data?.diff, `kanban:${props.threadShell.id}`);
+    if (patch?.kind !== "files") return [];
+    return patch.files.map((file) => {
+      const stats = getDiffLineStat([file]);
+      return {
+        path: resolveFileDiffPath(file),
+        insertions: stats.additions,
+        deletions: stats.deletions,
+      };
+    });
+  }, [fullThreadDiff.data?.diff, props.threadShell.id]);
   const visibleFiles = useMemo(
     () =>
       workingFiles.length > 0
@@ -418,12 +547,16 @@ function KanbanInspector(props: {
             insertions: file.insertions,
             deletions: file.deletions,
           }))
-        : checkpointFiles.map((file) => ({
-            path: file.path,
-            insertions: file.additions,
-            deletions: file.deletions,
-          })),
-    [checkpointFiles, workingFiles],
+        : fullThreadDiff.data
+          ? fullThreadFiles
+          : fullThreadDiff.error
+            ? checkpointFiles.map((file) => ({
+                path: file.path,
+                insertions: file.additions,
+                deletions: file.deletions,
+              }))
+            : [],
+    [checkpointFiles, fullThreadDiff.data, fullThreadDiff.error, fullThreadFiles, workingFiles],
   );
 
   const showLifecycleError = () =>
@@ -480,6 +613,174 @@ function KanbanInspector(props: {
     if (result._tag === "Failure") showLifecycleError();
   }, [props.lane, settleThread, threadRef, unarchiveThread, unsettleThread]);
 
+  const approveProposedExecution = useCallback(async () => {
+    if (
+      !automation ||
+      automation.taskKind !== "planning" ||
+      automation.stage !== "review" ||
+      !proposedExecution ||
+      proposedModelSelections.some((selection) => selection === null)
+    ) {
+      return;
+    }
+    setLifecyclePending(true);
+    const restorePolicy = async () => {
+      if (!policy.enabled) return;
+      await configureProjectAutomation({
+        environmentId: props.threadShell.environmentId,
+        input: {
+          projectId: props.project.id,
+          policy,
+        },
+      });
+    };
+    const ids = new Map(proposedExecution.tasks.map((task) => [task.key, newThreadId()]));
+    const createdIds: ReturnType<typeof newThreadId>[] = [];
+    const rollback = async () => {
+      for (const threadId of createdIds.toReversed()) {
+        await deleteThread({
+          environmentId: props.threadShell.environmentId,
+          input: { threadId },
+        });
+      }
+      await restorePolicy();
+    };
+    if (policy.enabled) {
+      const pauseResult = await configureProjectAutomation({
+        environmentId: props.threadShell.environmentId,
+        input: {
+          projectId: props.project.id,
+          policy: { ...policy, enabled: false },
+        },
+      });
+      if (pauseResult._tag === "Failure") {
+        setLifecyclePending(false);
+        showLifecycleError();
+        return;
+      }
+    }
+    for (const [index, task] of proposedExecution.tasks.entries()) {
+      const threadId = ids.get(task.key)!;
+      const modelSelection = proposedModelSelections[index]!;
+      const createdAt = new Date(Date.now() + index).toISOString();
+      const createResult = await createThread({
+        environmentId: props.threadShell.environmentId,
+        input: {
+          threadId,
+          projectId: props.project.id,
+          title: task.title,
+          modelSelection: modelSelection!,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: automation.baseBranch,
+          worktreePath: null,
+          createdAt,
+        },
+      });
+      if (createResult._tag === "Failure") {
+        await rollback();
+        setLifecyclePending(false);
+        showLifecycleError();
+        return;
+      }
+      createdIds.push(threadId);
+      const configureResult = await configureThreadAutomation({
+        environmentId: props.threadShell.environmentId,
+        input: {
+          threadId,
+          automation: {
+            taskKind: "implementation",
+            goal: task.goal,
+            acceptanceCriteria: [
+              ...task.acceptanceCriteria,
+              ...task.verification.map((check) => `Verification: ${check}`),
+            ],
+            dependencies: task.dependsOn.map((key) => ids.get(key)!),
+            changeScopes: task.changeScopes,
+            baseBranch: automation.baseBranch,
+            stage: "ready",
+            phase: "implementation",
+            attempt: 0,
+            maxAttempts: policy.defaultMaxAttempts,
+            maxRuntimeMinutes: policy.defaultMaxRuntimeMinutes,
+            leaseExpiresAt: null,
+            lastHeartbeatAt: null,
+            lastError: null,
+            feedback: null,
+            verification: { status: "pending", summary: null, completedAt: null },
+            startedAt: null,
+            completedAt: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        },
+      });
+      if (configureResult._tag === "Failure") {
+        await rollback();
+        setLifecyclePending(false);
+        showLifecycleError();
+        return;
+      }
+    }
+    const completedAt = new Date().toISOString();
+    const transitionResult = await transitionAutomation({
+      environmentId: props.threadShell.environmentId,
+      input: {
+        threadId: props.threadShell.id,
+        expectedStage: "review",
+        stage: "complete",
+        completedAt,
+      },
+    });
+    if (transitionResult._tag === "Failure") {
+      await rollback();
+      setLifecyclePending(false);
+      showLifecycleError();
+      return;
+    }
+    const enableResult = await configureProjectAutomation({
+      environmentId: props.threadShell.environmentId,
+      input: {
+        projectId: props.project.id,
+        policy: { ...policy, enabled: true },
+      },
+    });
+    if (enableResult._tag === "Failure") {
+      toastManager.add({
+        type: "warning",
+        title: "Plan approved; Autopilot is still paused",
+        description: "The tasks are safely queued. Start Autopilot when you are ready.",
+      });
+    }
+    setLifecyclePending(false);
+    toastManager.add({
+      type: "success",
+      title: "Plan approved",
+      description: `${proposedExecution.tasks.length} autonomous tasks are ready to run.`,
+    });
+  }, [
+    automation,
+    configureProjectAutomation,
+    configureThreadAutomation,
+    createThread,
+    deleteThread,
+    policy,
+    proposedExecution,
+    proposedModelSelections,
+    props.project.id,
+    props.threadShell.environmentId,
+    props.threadShell.id,
+    transitionAutomation,
+  ]);
+
+  const reviewDeliveryReady =
+    automation?.taskKind === "planning" ||
+    (gitStatus.data != null &&
+      !gitStatus.data.hasWorkingTreeChanges &&
+      (policy.deliveryMode !== "pull-request" || gitStatus.data.pr?.state === "open") &&
+      (policy.deliveryMode !== "push-branch" || !gitStatus.data.aheadCount));
+  const reviewNeedsDelivery = automation?.stage === "review" && !reviewDeliveryReady;
+
   const primaryAction = automation
     ? automation.stage === "planned"
       ? { label: "Queue task", Icon: PlayIcon, run: () => transition("ready") }
@@ -489,36 +790,44 @@ function KanbanInspector(props: {
             Icon: MessageSquareTextIcon,
             run: async () => props.onOpenThread(props.threadShell),
           }
-        : automation.stage === "review"
-          ? {
-              label: "Approve",
-              Icon: CheckCircle2Icon,
-              run: () => transition("complete", { completedAt: new Date().toISOString() }),
-            }
-          : automation.stage === "failed"
+        : automation.stage === "review" && automation.taskKind === "planning"
+          ? proposedExecution && proposedModelSelections.every((selection) => selection !== null)
             ? {
-                label: "Retry",
-                Icon: RotateCcwIcon,
-                run: () => transition("ready", { lastError: null, completedAt: null }),
+                label: "Approve plan & start",
+                Icon: SparklesIcon,
+                run: approveProposedExecution,
               }
-            : automation.stage === "complete" || automation.stage === "cancelled"
+            : null
+          : automation.stage === "review" && reviewDeliveryReady
+            ? {
+                label: "Approve task",
+                Icon: CheckCircle2Icon,
+                run: () => transition("complete", { completedAt: new Date().toISOString() }),
+              }
+            : automation.stage === "failed"
               ? {
-                  label: "Reopen",
+                  label: "Retry",
                   Icon: RotateCcwIcon,
-                  run: () =>
-                    transition("ready", {
-                      phase: "implementation",
-                      feedback: null,
-                      completedAt: null,
-                      lastError: null,
-                      verification: {
-                        status: "pending",
-                        summary: null,
-                        completedAt: null,
-                      },
-                    }),
+                  run: () => transition("ready", { lastError: null, completedAt: null }),
                 }
-              : null
+              : automation.stage === "complete" || automation.stage === "cancelled"
+                ? {
+                    label: "Reopen",
+                    Icon: RotateCcwIcon,
+                    run: () =>
+                      transition("ready", {
+                        phase: "implementation",
+                        feedback: null,
+                        completedAt: null,
+                        lastError: null,
+                        verification: {
+                          status: "pending",
+                          summary: null,
+                          completedAt: null,
+                        },
+                      }),
+                  }
+                : null
     : null;
 
   const legacyAction =
@@ -586,6 +895,88 @@ function KanbanInspector(props: {
               ) : null}
             </section>
 
+            {automation?.taskKind === "planning" ? (
+              <section
+                aria-labelledby="kanban-plan-heading"
+                className="border-t border-foreground/[0.07] pt-4"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <h3
+                    id="kanban-plan-heading"
+                    className="text-[11px] font-medium text-foreground/82"
+                  >
+                    Proposed execution
+                  </h3>
+                  {proposedExecution ? (
+                    <span className="text-[10px] tabular-nums text-muted-foreground">
+                      {proposedExecution.tasks.length} tasks
+                    </span>
+                  ) : null}
+                </div>
+                {proposedExecution ? (
+                  <>
+                    <p className="mt-2 text-[11px] leading-4 text-muted-foreground/72">
+                      {proposedExecution.summary}
+                    </p>
+                    <ol className="mt-3 space-y-2">
+                      {proposedExecution.tasks.map((task, index) => {
+                        const modelAvailable = proposedModelSelections[index] !== null;
+                        return (
+                          <li
+                            key={task.key}
+                            className="rounded-[14px] border border-foreground/[0.065] bg-foreground/[0.02] px-3 py-2.5"
+                          >
+                            <div className="flex items-start gap-2.5">
+                              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground/[0.055] text-[10px] tabular-nums text-muted-foreground">
+                                {index + 1}
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <p className="text-[11px] font-medium leading-4 text-foreground/84">
+                                  {task.title}
+                                </p>
+                                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground/68">
+                                  <span
+                                    className={cn(
+                                      "rounded-full border px-1.5 py-0.5",
+                                      modelAvailable
+                                        ? "border-foreground/[0.07] bg-foreground/[0.03]"
+                                        : "border-destructive/20 bg-destructive/[0.04] text-destructive",
+                                    )}
+                                  >
+                                    {compactModelLabel(task.model)} · {task.reasoningEffort}
+                                  </span>
+                                  {task.dependsOn.length > 0 ? (
+                                    <span>after {task.dependsOn.join(", ")}</span>
+                                  ) : (
+                                    <span>can start immediately</span>
+                                  )}
+                                </div>
+                                <p className="mt-1.5 truncate font-mono text-[9px] text-muted-foreground/55">
+                                  {task.changeScopes.join(" · ")}
+                                </p>
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                    {proposedModelSelections.some((selection) => selection === null) ? (
+                      <p className="mt-2.5 rounded-[12px] border border-destructive/15 bg-destructive/[0.035] px-3 py-2 text-[10px] leading-4 text-destructive">
+                        One or more proposed models are unavailable in this environment. Open the
+                        planning response and ask the agent to use an installed model.
+                      </p>
+                    ) : null}
+                  </>
+                ) : (
+                  <p className="mt-2 text-[11px] leading-4 text-muted-foreground/65">
+                    {automation.stage === "running" || automation.stage === "ready"
+                      ? "The planning agent is inspecting the repository. Its task graph will appear here for approval."
+                      : "No valid structured plan was found. Open the planning response to inspect or revise it."}
+                  </p>
+                )}
+              </section>
+            ) : null}
+
             {automation ? (
               <section
                 aria-labelledby="kanban-run-heading"
@@ -634,6 +1025,20 @@ function KanbanInspector(props: {
                         );
                       })}
                     </div>
+                  </div>
+                ) : null}
+                {automation.changeScopes.length > 0 ? (
+                  <div className="mt-3">
+                    <p className="text-[10px] text-muted-foreground/60">Change scope</p>
+                    <p className="mt-1.5 truncate font-mono text-[10px] text-muted-foreground/75">
+                      {automation.changeScopes.join(" · ")}
+                    </p>
+                    {conflictBlockers.length > 0 ? (
+                      <p className="mt-1.5 text-[10px] leading-4 text-warning">
+                        Waiting for {conflictBlockers.map((item) => item.title).join(", ")} to leave
+                        these paths.
+                      </p>
+                    ) : null}
                   </div>
                 ) : null}
                 {automation.lastError ? (
@@ -702,99 +1107,123 @@ function KanbanInspector(props: {
               </div>
             </section>
 
-            <section
-              aria-labelledby="kanban-changes-heading"
-              className="border-t border-foreground/[0.07] pt-4"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <h3
-                  id="kanban-changes-heading"
-                  className="text-[11px] font-medium text-foreground/82"
-                >
-                  Changes
-                </h3>
-                {checkpoint ? (
-                  <span className="text-[10px] tabular-nums text-muted-foreground">
-                    {checkpoint.files} {checkpoint.files === 1 ? "file" : "files"}
-                  </span>
-                ) : null}
-              </div>
-              <div className="mt-2.5 space-y-2">
-                {visibleFiles.length > 0 ? (
-                  visibleFiles.slice(0, 6).map((file) => (
-                    <div key={file.path} className="flex items-center gap-2 text-[11px]">
-                      <FileCode2Icon
-                        aria-hidden
-                        className="size-3.5 shrink-0 text-muted-foreground/60"
-                      />
-                      <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground/82">
-                        {file.path}
-                      </span>
-                      {file.insertions === 0 && file.deletions === 0 ? (
-                        <span className="shrink-0 text-[10px] text-muted-foreground/65">
-                          Changed
-                        </span>
-                      ) : (
-                        <span className="shrink-0 font-mono tabular-nums">
-                          <span className="text-success">+{file.insertions}</span>{" "}
-                          <span className="text-destructive">-{file.deletions}</span>
-                        </span>
-                      )}
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-[11px] text-muted-foreground/65">
-                    No changed files were recorded for this task.
-                  </p>
-                )}
-              </div>
-            </section>
-
-            <section
-              aria-labelledby="kanban-source-control-heading"
-              className="border-t border-foreground/[0.07] pt-4"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <div>
+            {automation?.taskKind !== "planning" ? (
+              <section
+                aria-labelledby="kanban-changes-heading"
+                className="border-t border-foreground/[0.07] pt-4"
+              >
+                <div className="flex items-center justify-between gap-3">
                   <h3
-                    id="kanban-source-control-heading"
+                    id="kanban-changes-heading"
                     className="text-[11px] font-medium text-foreground/82"
                   >
-                    Source control
+                    Changes
                   </h3>
-                  <p className="mt-1 text-[10px] text-muted-foreground/65">
-                    {gitStatus.data?.pr?.state === "open"
-                      ? `Pull request #${gitStatus.data.pr.number} is open`
-                      : gitStatus.data?.hasWorkingTreeChanges
-                        ? "Uncommitted changes"
-                        : gitStatus.data?.aheadCount
-                          ? `${gitStatus.data.aheadCount} commit${gitStatus.data.aheadCount === 1 ? "" : "s"} ahead`
-                          : "Worktree is up to date"}
-                  </p>
+                  {!fullThreadDiff.isPending || workingFiles.length > 0 ? (
+                    <span className="text-[10px] tabular-nums text-muted-foreground">
+                      {visibleFiles.length} {visibleFiles.length === 1 ? "file" : "files"}
+                    </span>
+                  ) : null}
                 </div>
-                <div className="w-fit shrink-0">
-                  <GitActionsControl gitCwd={gitCwd} activeThreadRef={threadRef} />
+                <div className="mt-2.5 space-y-2">
+                  {fullThreadDiff.isPending && workingFiles.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground/65">
+                      Calculating the complete task diff…
+                    </p>
+                  ) : visibleFiles.length > 0 ? (
+                    visibleFiles.slice(0, 6).map((file) => (
+                      <div key={file.path} className="flex items-center gap-2 text-[11px]">
+                        <FileCode2Icon
+                          aria-hidden
+                          className="size-3.5 shrink-0 text-muted-foreground/60"
+                        />
+                        <span className="min-w-0 flex-1 truncate font-mono text-muted-foreground/82">
+                          {file.path}
+                        </span>
+                        {file.insertions === 0 && file.deletions === 0 ? (
+                          <span className="shrink-0 text-[10px] text-muted-foreground/65">
+                            Changed
+                          </span>
+                        ) : (
+                          <span className="shrink-0 font-mono tabular-nums">
+                            <span className="text-success">+{file.insertions}</span>{" "}
+                            <span className="text-destructive">-{file.deletions}</span>
+                          </span>
+                        )}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground/65">
+                      No changed files were recorded for this task.
+                    </p>
+                  )}
                 </div>
-              </div>
-            </section>
+              </section>
+            ) : null}
+
+            {automation?.taskKind !== "planning" ? (
+              <section
+                aria-labelledby="kanban-source-control-heading"
+                className="border-t border-foreground/[0.07] pt-4"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3
+                      id="kanban-source-control-heading"
+                      className="text-[11px] font-medium text-foreground/82"
+                    >
+                      Source control
+                    </h3>
+                    <p className="mt-1 text-[10px] text-muted-foreground/65">
+                      {gitStatus.data?.pr?.state === "open"
+                        ? `Pull request #${gitStatus.data.pr.number} is open`
+                        : gitStatus.data?.hasWorkingTreeChanges
+                          ? "Uncommitted changes"
+                          : gitStatus.data?.aheadCount
+                            ? `${gitStatus.data.aheadCount} commit${gitStatus.data.aheadCount === 1 ? "" : "s"} ahead`
+                            : "Worktree is up to date"}
+                    </p>
+                  </div>
+                  {automation?.stage === "review" ? (
+                    <span
+                      className={cn(
+                        "rounded-full border px-2 py-1 text-[10px]",
+                        reviewDeliveryReady
+                          ? "border-success/18 bg-success/[0.045] text-success"
+                          : "border-warning/18 bg-warning/[0.045] text-warning",
+                      )}
+                    >
+                      {reviewDeliveryReady ? "Ready" : "Delivery needed"}
+                    </span>
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
           </div>
         </ScrollArea>
 
         <div className="grid grid-cols-2 gap-2 border-t border-foreground/[0.07] p-4">
+          {automation?.taskKind !== "planning" ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                props.onOpenDiff(
+                  props.threadShell,
+                  gitStatus.data?.hasWorkingTreeChanges ? "unstaged" : "branch",
+                )
+              }
+            >
+              <PanelsTopLeftIcon aria-hidden className="size-3.5" />
+              Open diff
+            </Button>
+          ) : null}
           <Button
+            className={cn(automation?.taskKind === "planning" && "col-span-2")}
             variant="outline"
             size="sm"
-            onClick={() =>
-              props.onOpenDiff(
-                props.threadShell,
-                gitStatus.data?.hasWorkingTreeChanges ? "unstaged" : "branch",
-              )
-            }
+            onClick={() => props.onOpenThread(props.threadShell)}
           >
-            <PanelsTopLeftIcon aria-hidden className="size-3.5" />
-            Open diff
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => props.onOpenThread(props.threadShell)}>
             <MessageSquareTextIcon aria-hidden className="size-3.5" />
             Open chat
           </Button>
@@ -808,6 +1237,11 @@ function KanbanInspector(props: {
             >
               Request changes
             </Button>
+          ) : null}
+          {reviewNeedsDelivery ? (
+            <div className="col-span-1 flex min-w-0 items-center justify-end">
+              <GitActionsControl gitCwd={gitCwd} activeThreadRef={threadRef} />
+            </div>
           ) : null}
           {automation?.stage === "ready" ? (
             <Button
@@ -839,7 +1273,9 @@ function KanbanInspector(props: {
             </Button>
           ) : primaryAction ? (
             <Button
-              className={cn(automation?.stage === "review" ? "" : "col-span-2")}
+              className={cn(
+                automation?.stage === "review" && !reviewNeedsDelivery ? "" : "col-span-2",
+              )}
               size="sm"
               disabled={lifecyclePending}
               onClick={() => void primaryAction.run()}
@@ -905,10 +1341,11 @@ function HistoryBoard(props: {
         <header className="mb-4">
           <h2 className="flex items-center gap-2 text-sm font-medium text-foreground/90">
             <HistoryIcon aria-hidden className="size-4 text-muted-foreground" />
-            Worktree history
+            Project history
           </h2>
           <p className="mt-1 text-[11px] text-muted-foreground">
-            Archived work from this project. Restore a card to return it to the active board.
+            Older completed work and archived tasks, kept off the active board without losing
+            detail.
           </p>
         </header>
         <ScrollArea className="min-h-0 flex-1">
@@ -936,7 +1373,7 @@ function HistoryBoard(props: {
           ) : threads.length === 0 ? (
             <div className="flex min-h-56 flex-col items-center justify-center rounded-[22px] border border-dashed border-foreground/[0.08] text-center">
               <HistoryIcon aria-hidden className="mb-3 size-5 text-muted-foreground/35" />
-              <p className="text-xs font-medium text-foreground/72">No archived worktrees</p>
+              <p className="text-xs font-medium text-foreground/72">No project history</p>
               <p className="mt-1 text-[11px] text-muted-foreground/60">
                 Archived tasks will appear here without crowding the active board.
               </p>
@@ -964,6 +1401,7 @@ function HistoryBoard(props: {
 function AutomationControlBar(props: {
   readonly project: EnvironmentProject;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
+  readonly onOpenGoal: () => void;
   readonly onOpenSettings: () => void;
 }) {
   const configureAutomation = useAtomCommand(projectEnvironment.configureAutomation, {
@@ -1021,6 +1459,10 @@ function AutomationControlBar(props: {
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
+        <Button variant="outline" size="xs" onClick={props.onOpenGoal}>
+          <SparklesIcon aria-hidden className="size-3.5" />
+          Plan project
+        </Button>
         <Button variant="outline" size="xs" onClick={() => void toggle()} disabled={pending}>
           {pending ? <OpenTuiSpinner name="dots" /> : policy.enabled ? <PauseIcon /> : <PlayIcon />}
           {policy.enabled ? "Pause" : "Start"}
@@ -1046,6 +1488,7 @@ export function KanbanBoard(props: {
   readonly archivedThreadsError: string | null;
   readonly onRefreshArchivedThreads: () => void;
   readonly historyOpen: boolean;
+  readonly onHistoryOpenChange: (open: boolean) => void;
   readonly newTaskOpen: boolean;
   readonly onNewTaskOpenChange: (open: boolean) => void;
   readonly baseBranch: string;
@@ -1055,15 +1498,34 @@ export function KanbanBoard(props: {
 }) {
   const now = useMemo(() => new Date().toISOString(), [props.threads, props.archivedThreads]);
   const lanes = useMemo(() => groupKanbanThreads(props.threads, now), [now, props.threads]);
+  const completed = lanes.find((lane) => lane.id === "complete")?.threads ?? [];
+  const completedCap = useMemo(() => capCompletedKanbanThreads(completed, 4), [completed]);
+  const visibleLanes = useMemo(
+    () =>
+      lanes.map((lane) =>
+        lane.id === "complete" ? { ...lane, threads: completedCap.visible } : lane,
+      ),
+    [completedCap.visible, lanes],
+  );
+  const historyThreads = useMemo(() => {
+    const byKey = new Map(
+      [...completedCap.overflow, ...props.archivedThreads].map((thread) => [
+        kanbanThreadKey(thread),
+        thread,
+      ]),
+    );
+    return [...byKey.values()];
+  }, [completedCap.overflow, props.archivedThreads]);
   const visibleThreads = useMemo(
     () =>
       props.historyOpen
-        ? sortKanbanThreads(props.archivedThreads)
-        : lanes.flatMap((lane) => lane.threads),
-    [lanes, props.archivedThreads, props.historyOpen],
+        ? sortKanbanThreads(historyThreads)
+        : visibleLanes.flatMap((lane) => lane.threads),
+    [historyThreads, props.historyOpen, visibleLanes],
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [goalOpen, setGoalOpen] = useState(false);
   const selectedThread = selectedKey
     ? (visibleThreads.find((thread) => kanbanThreadKey(thread) === selectedKey) ?? null)
     : null;
@@ -1086,12 +1548,13 @@ export function KanbanBoard(props: {
           <AutomationControlBar
             project={props.project}
             threads={props.threads}
+            onOpenGoal={() => setGoalOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         ) : null}
         {props.historyOpen ? (
           <HistoryBoard
-            threads={props.archivedThreads}
+            threads={historyThreads}
             loading={props.archivedThreadsLoading}
             error={props.archivedThreadsError}
             selectedKey={selectedKey}
@@ -1100,14 +1563,17 @@ export function KanbanBoard(props: {
           />
         ) : (
           <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-x-auto p-4 sm:p-5">
-            {lanes.map((lane) => (
+            {visibleLanes.map((lane) => (
               <KanbanLaneColumn
                 key={lane.id}
                 lane={lane.id}
                 threads={lane.threads}
                 allThreads={props.threads}
+                compact={lane.threads.length === 0}
+                hiddenCount={lane.id === "complete" ? completedCap.overflow.length : 0}
                 selectedKey={selectedKey}
                 onSelect={selectThread}
+                onShowHistory={() => props.onHistoryOpenChange(true)}
               />
             ))}
           </div>
@@ -1117,6 +1583,7 @@ export function KanbanBoard(props: {
       {selectedThread ? (
         <KanbanInspector
           key={kanbanThreadKey(selectedThread)}
+          project={props.project}
           threadShell={selectedThread}
           allThreads={props.threads}
           lane={classifyKanbanThread(selectedThread, now)}
@@ -1132,6 +1599,14 @@ export function KanbanBoard(props: {
         onOpenChange={props.onNewTaskOpenChange}
         project={props.project}
         threads={props.threads}
+        baseBranch={props.baseBranch}
+        modelSelection={props.modelSelection}
+      />
+      <KanbanProjectGoalDialog
+        key={`goal:${props.project.environmentId}:${props.project.id}:${props.baseBranch}`}
+        open={goalOpen}
+        onOpenChange={setGoalOpen}
+        project={props.project}
         baseBranch={props.baseBranch}
         modelSelection={props.modelSelection}
       />

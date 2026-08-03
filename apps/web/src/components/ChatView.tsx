@@ -5874,6 +5874,7 @@ function ChatViewContent(props: ChatViewProps) {
               archivedThreadsError={archivedThreadSnapshots.error}
               onRefreshArchivedThreads={archivedThreadSnapshots.refresh}
               historyOpen={kanbanHistoryOpen}
+              onHistoryOpenChange={setKanbanHistoryOpen}
               newTaskOpen={kanbanNewTaskOpen}
               onNewTaskOpenChange={setKanbanNewTaskOpen}
               baseBranch={activeThread.branch ?? "main"}

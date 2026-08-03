@@ -11,11 +11,13 @@ import {
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
+  OrchestrationProjectAutomationPolicy,
   ProjectCreatedPayload,
   ProjectMetaUpdatedPayload,
   OrchestrationProposedPlan,
   OrchestrationSession,
   OrchestrationThread,
+  OrchestrationThreadAutomation,
   OrchestrationThreadShell,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
@@ -41,7 +43,47 @@ const decodeOrchestrationProposedPlan = Schema.decodeUnknownEffect(Orchestration
 const decodeOrchestrationSession = Schema.decodeUnknownEffect(OrchestrationSession);
 const decodeOrchestrationThread = Schema.decodeUnknownEffect(OrchestrationThread);
 const decodeOrchestrationThreadShell = Schema.decodeUnknownEffect(OrchestrationThreadShell);
+const decodeAutomationPolicy = Schema.decodeUnknownEffect(OrchestrationProjectAutomationPolicy);
+const decodeThreadAutomation = Schema.decodeUnknownEffect(OrchestrationThreadAutomation);
 const encodeThreadCreatedPayload = Schema.encodeEffect(ThreadCreatedPayload);
+
+it.effect("automation contracts backfill autonomy fields from older snapshots", () =>
+  Effect.gen(function* () {
+    const policy = yield* decodeAutomationPolicy({
+      enabled: true,
+      maxConcurrentRuns: 2,
+      defaultMaxAttempts: 2,
+      defaultMaxRuntimeMinutes: 60,
+      createWorktrees: true,
+      requireVerification: true,
+      requireReview: true,
+      deliveryMode: "local-commit",
+    });
+    assert.strictEqual(policy.stuckAfterMinutes, 15);
+    const automation = yield* decodeThreadAutomation({
+      goal: "Ship the task",
+      acceptanceCriteria: [],
+      dependencies: [],
+      baseBranch: "main",
+      stage: "ready",
+      phase: "implementation",
+      attempt: 0,
+      maxAttempts: 2,
+      maxRuntimeMinutes: 60,
+      leaseExpiresAt: null,
+      lastHeartbeatAt: null,
+      lastError: null,
+      feedback: null,
+      verification: { status: "pending", summary: null, completedAt: null },
+      startedAt: null,
+      completedAt: null,
+      createdAt: "2026-08-03T12:00:00.000Z",
+      updatedAt: "2026-08-03T12:00:00.000Z",
+    });
+    assert.strictEqual(automation.taskKind, "implementation");
+    assert.deepStrictEqual(automation.changeScopes, []);
+  }),
+);
 
 function getOptionValue(
   options: ReadonlyArray<{ id: string; value: unknown }> | undefined,

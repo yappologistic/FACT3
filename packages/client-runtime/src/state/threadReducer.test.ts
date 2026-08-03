@@ -808,9 +808,11 @@ describe("applyThreadDetailEvent", () => {
   describe("thread automation", () => {
     it("keeps a loaded task detail synchronized with lifecycle transitions", () => {
       const pendingAutomation = {
+        taskKind: "implementation" as const,
         goal: "Ship the utility",
         acceptanceCriteria: ["Focused tests pass"],
         dependencies: [],
+        changeScopes: ["packages/client-runtime/src"],
         baseBranch: "main",
         stage: "running" as const,
         phase: "verification" as const,

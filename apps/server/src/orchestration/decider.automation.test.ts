@@ -22,9 +22,11 @@ const threadA = ThreadId.make("automation-a");
 const threadB = ThreadId.make("automation-b");
 
 const automation = (dependencies: ReadonlyArray<ThreadId> = []): OrchestrationThreadAutomation => ({
+  taskKind: "implementation",
   goal: "Implement the autonomous task",
   acceptanceCriteria: ["Focused tests pass"],
   dependencies,
+  changeScopes: ["apps/server/src/orchestration"],
   baseBranch: "main",
   stage: "ready",
   phase: "implementation",
@@ -145,6 +147,7 @@ it.layer(NodeServices.layer)("automation decider", (it) => {
             maxConcurrentRuns: 3,
             defaultMaxAttempts: 2,
             defaultMaxRuntimeMinutes: 60,
+            stuckAfterMinutes: 15,
             createWorktrees: true,
             requireVerification: true,
             requireReview: true,

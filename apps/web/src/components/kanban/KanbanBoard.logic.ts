@@ -14,6 +14,107 @@ export interface KanbanLaneGroup {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
 }
 
+export const AUTOMATION_PLAN_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
+export type AutomationPlanEffort = (typeof AUTOMATION_PLAN_EFFORTS)[number];
+
+export interface AutomationPlanTask {
+  readonly key: string;
+  readonly title: string;
+  readonly goal: string;
+  readonly acceptanceCriteria: ReadonlyArray<string>;
+  readonly dependsOn: ReadonlyArray<string>;
+  readonly changeScopes: ReadonlyArray<string>;
+  readonly model: string;
+  readonly reasoningEffort: AutomationPlanEffort;
+  readonly verification: ReadonlyArray<string>;
+}
+
+export interface AutomationPlan {
+  readonly summary: string;
+  readonly tasks: ReadonlyArray<AutomationPlanTask>;
+}
+
+function stringArray(value: unknown, maximum: number): ReadonlyArray<string> | null {
+  if (!Array.isArray(value) || value.length > maximum) return null;
+  const values = value
+    .filter((item): item is string => typeof item === "string")
+    .map((item) => item.trim());
+  return values.length === value.length && values.every(Boolean) ? values : null;
+}
+
+export function parseAutomationPlan(text: string): AutomationPlan | null {
+  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text)?.[1];
+  const candidate = fenced ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  if (!candidate.trim()) return null;
+  let decoded: unknown;
+  try {
+    decoded = JSON.parse(candidate);
+  } catch {
+    return null;
+  }
+  if (typeof decoded !== "object" || decoded === null) return null;
+  const record = decoded as Record<string, unknown>;
+  if (typeof record.summary !== "string" || !Array.isArray(record.tasks)) return null;
+  if (record.tasks.length === 0 || record.tasks.length > 8) return null;
+  const tasks: AutomationPlanTask[] = [];
+  for (const value of record.tasks) {
+    if (typeof value !== "object" || value === null) return null;
+    const task = value as Record<string, unknown>;
+    const acceptanceCriteria = stringArray(task.acceptanceCriteria, 24);
+    const dependsOn = stringArray(task.dependsOn, 16);
+    const changeScopes = stringArray(task.changeScopes, 32);
+    const verification = stringArray(task.verification, 16);
+    if (
+      typeof task.key !== "string" ||
+      typeof task.title !== "string" ||
+      typeof task.goal !== "string" ||
+      typeof task.model !== "string" ||
+      typeof task.reasoningEffort !== "string" ||
+      !AUTOMATION_PLAN_EFFORTS.includes(task.reasoningEffort as AutomationPlanEffort) ||
+      acceptanceCriteria === null ||
+      acceptanceCriteria.length === 0 ||
+      dependsOn === null ||
+      changeScopes === null ||
+      changeScopes.length === 0 ||
+      verification === null ||
+      verification.length === 0
+    ) {
+      return null;
+    }
+    tasks.push({
+      key: task.key.trim(),
+      title: task.title.trim(),
+      goal: task.goal.trim(),
+      acceptanceCriteria,
+      dependsOn,
+      changeScopes,
+      model: task.model.trim(),
+      reasoningEffort: task.reasoningEffort as AutomationPlanEffort,
+      verification,
+    });
+  }
+  if (tasks.some((task) => !task.key || !task.title || !task.goal || !task.model)) return null;
+  const keys = new Set(tasks.map((task) => task.key));
+  if (keys.size !== tasks.length) return null;
+  if (tasks.some((task) => task.dependsOn.some((key) => !keys.has(key) || key === task.key))) {
+    return null;
+  }
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const dependencies = new Map(tasks.map((task) => [task.key, task.dependsOn]));
+  const hasCycle = (key: string): boolean => {
+    if (visiting.has(key)) return true;
+    if (visited.has(key)) return false;
+    visiting.add(key);
+    if ((dependencies.get(key) ?? []).some(hasCycle)) return true;
+    visiting.delete(key);
+    visited.add(key);
+    return false;
+  };
+  if (tasks.some((task) => hasCycle(task.key))) return null;
+  return { summary: record.summary.trim(), tasks };
+}
+
 export function liveKanbanAutomation(
   shell: Pick<EnvironmentThreadShell, "automation">,
   detail: Pick<EnvironmentThread, "automation"> | null,
@@ -122,7 +223,9 @@ export function describeKanbanThreadState(
       case "complete":
         return "Complete";
       case "failed":
-        return "Run failed";
+        return thread.automation.lastError?.startsWith("No agent activity")
+          ? "Agent stalled"
+          : "Run failed";
       case "cancelled":
         return "Cancelled";
     }
@@ -181,6 +284,53 @@ export function incompleteAutomationDependencies(
     const dependency = byId.get(dependencyId);
     return dependency ? [dependency] : [];
   });
+}
+
+function normalizedScopePrefix(scope: string): string | null {
+  const normalized = scope.trim().replaceAll("\\", "/").replace(/^\.\//, "");
+  const wildcard = normalized.search(/[?*{[]/);
+  const prefix = (wildcard === -1 ? normalized : normalized.slice(0, wildcard))
+    .replace(/\/+$/, "")
+    .trim();
+  return prefix.length > 0 ? prefix.toLowerCase() : null;
+}
+
+export function automationConflictBlockers(
+  thread: EnvironmentThreadShell,
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+): ReadonlyArray<EnvironmentThreadShell> {
+  const scopes = thread.automation?.changeScopes ?? [];
+  if (thread.automation?.stage !== "ready" || scopes.length === 0) return [];
+  return threads.filter((candidate) => {
+    if (
+      candidate.id === thread.id ||
+      (candidate.automation?.stage !== "running" && candidate.automation?.stage !== "needs-input")
+    ) {
+      return false;
+    }
+    const candidateScopes = candidate.automation.changeScopes;
+    return scopes.some((scope) => {
+      const left = normalizedScopePrefix(scope);
+      if (left === null) return false;
+      return candidateScopes.some((candidateScope) => {
+        const right = normalizedScopePrefix(candidateScope);
+        return (
+          right !== null &&
+          (left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`))
+        );
+      });
+    });
+  });
+}
+
+export function capCompletedKanbanThreads(
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  limit: number,
+): {
+  readonly visible: ReadonlyArray<EnvironmentThreadShell>;
+  readonly overflow: ReadonlyArray<EnvironmentThreadShell>;
+} {
+  return { visible: threads.slice(0, limit), overflow: threads.slice(limit) };
 }
 
 export function latestCheckpointSummary(
