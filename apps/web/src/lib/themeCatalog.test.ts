@@ -42,7 +42,7 @@ const EXPECTED_PRESET_IDS = [
 ] as const;
 
 describe("theme catalog", () => {
-  it("contains every reference preset plus T3 Code exactly once", () => {
+  it("contains every reference preset plus FACT3 Code exactly once", () => {
     const ids = THEME_PRESETS.map((preset) => preset.id);
     expect(ids).toEqual(EXPECTED_PRESET_IDS);
     expect(new Set(ids).size).toBe(ids.length);

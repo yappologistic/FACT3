@@ -1,45 +1,27 @@
 {
   "fill": {
-    "solid": "display-p3:0.00000,0.00000,0.00000,1.00000"
+    "solid": "display-p3:0.02700,0.21600,0.74100,1.00000"
   },
   "groups": [
     {
       "layers": [
         {
-          "glass": true,
-          "image-name": "text.svg",
-          "name": "Text",
-          "position": {
-            "scale": 8.5,
-            "translation-in-points": [0, 0]
-          }
-        },
-        {
           "glass": false,
-          "image-name": "annotations.svg",
-          "name": "Annotations",
+          "image-name": "orchestration.png",
+          "name": "Orchestration",
           "position": {
-            "scale": 8.5,
-            "translation-in-points": [0, 0]
-          }
-        },
-        {
-          "glass": true,
-          "image-name": "background.svg",
-          "name": "Background",
-          "position": {
-            "scale": 8.1,
+            "scale": 1,
             "translation-in-points": [0, 0]
           }
         }
       ],
       "shadow": {
         "kind": "neutral",
-        "opacity": 0.6
+        "opacity": 0
       },
       "translucency": {
-        "enabled": true,
-        "value": 0.2
+        "enabled": false,
+        "value": 0
       }
     }
   ],

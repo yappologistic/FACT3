@@ -100,6 +100,15 @@ function getIconOption(
   });
 }
 
+export function syncWindowsTaskbarIcon(
+  window: Electron.BrowserWindow,
+  iconPath: string | undefined,
+  platform: NodeJS.Platform,
+): void {
+  if (platform !== "win32" || iconPath === undefined || window.isDestroyed()) return;
+  window.setIcon(iconPath);
+}
+
 function getInitialWindowBackgroundColor(shouldUseDarkColors: boolean): string {
   return shouldUseDarkColors ? "#0a0a0a" : "#ffffff";
 }
@@ -359,6 +368,8 @@ export const make = Effect.gen(function* () {
         webviewTag: true,
       },
     });
+    const windowIconPath = "icon" in iconOption ? iconOption.icon : undefined;
+    syncWindowsTaskbarIcon(window, windowIconPath, environment.platform);
 
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);
@@ -647,7 +658,13 @@ export const make = Effect.gen(function* () {
       );
     });
 
-    const revealSubscribers: RevealSubscription[] = [(fire) => window.once("ready-to-show", fire)];
+    const revealSubscribers: RevealSubscription[] = [
+      (fire) =>
+        window.once("ready-to-show", () => {
+          syncWindowsTaskbarIcon(window, windowIconPath, environment.platform);
+          fire();
+        }),
+    ];
     if (environment.platform === "linux") {
       revealSubscribers.push((fire) => window.webContents.once("did-finish-load", fire));
     }

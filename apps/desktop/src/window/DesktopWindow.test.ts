@@ -98,6 +98,7 @@ function makeFakeBrowserWindow() {
     setBackgroundColor: vi.fn(),
     setBackgroundMaterial: vi.fn(),
     setAutoHideCursor: vi.fn(),
+    setIcon: vi.fn(),
     setTitle: vi.fn(),
     setTitleBarOverlay: vi.fn(),
     setVibrancy: vi.fn(),
@@ -121,6 +122,7 @@ function makeFakeBrowserWindow() {
     setAutoHideCursor: window.setAutoHideCursor,
     setBackgroundColor: window.setBackgroundColor,
     setBackgroundMaterial: window.setBackgroundMaterial,
+    setIcon: window.setIcon,
     setVibrancy: window.setVibrancy,
     webContentsListeners,
     windowListeners,
@@ -400,6 +402,14 @@ describe("DesktopWindow", () => {
     DesktopWindow.syncWindowTranslucency(fakeWindow.window, false, "darwin", false);
     assert.deepEqual(fakeWindow.setVibrancy.mock.calls.at(-1), [null]);
     assert.deepEqual(fakeWindow.setBackgroundColor.mock.calls.at(-1), ["#ffffff"]);
+  });
+
+  it("reapplies the development icon to the Windows taskbar window", () => {
+    const fakeWindow = makeFakeBrowserWindow();
+
+    DesktopWindow.syncWindowsTaskbarIcon(fakeWindow.window, "C:\\repo\\dev-icon.ico", "win32");
+
+    assert.deepEqual(fakeWindow.setIcon.mock.calls, [["C:\\repo\\dev-icon.ico"]]);
   });
 
   it("restores bounds only when the window fits within a connected display", () => {

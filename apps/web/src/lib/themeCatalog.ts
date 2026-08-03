@@ -46,7 +46,7 @@ const preset = (
 export const THEME_PRESETS = [
   preset(
     "t3-code",
-    "T3 Code",
+    "FACT3 Code",
     seed("#fcfcfc", "#27272a", "#ffffff", "#fafafa", "#4f46e5"),
     seed("#0a0a0a", "#f5f5f5", "#0d0d0d", "#0d0d0d", "#6366f1"),
     "pierre-light",

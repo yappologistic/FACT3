@@ -179,7 +179,7 @@ export function AppearanceThemeSettings() {
       setAppearance(normalizeAppearancePreferences(parsed));
       setStatusMessage("Theme imported.");
     } catch {
-      setStatusMessage("That file is not a valid T3 Code theme.");
+      setStatusMessage("That file is not a valid FACT3 Code theme.");
     } finally {
       if (importInputRef.current) importInputRef.current.value = "";
     }
@@ -270,7 +270,7 @@ export function AppearanceThemeSettings() {
               <SelectTrigger className="w-44" aria-label="Color theme preset">
                 <SelectValue>
                   {THEME_PRESETS.find((item) => item.id === appearance.presetId)?.label ??
-                    "T3 Code"}
+                    "FACT3 Code"}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false} className="max-h-80">

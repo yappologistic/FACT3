@@ -1,7 +1,7 @@
-# T3 Code Mobile
+# FACT3 Code Mobile
 
 > [!WARNING]
-> T3 Code Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
+> FACT3 Code Mobile is currently in development and is not distributed yet. If you want to try it out, you can build it from source.
 
 ## Quickstart
 
@@ -10,9 +10,9 @@
 
 This app has three variants:
 
-- `development`: Expo dev client, installable side-by-side as `T3 Code Dev`
-- `preview`: persistent internal preview build, installable side-by-side as `T3 Code Preview`
-- `production`: store/release build as `T3 Code`
+- `development`: Expo dev client, installable side-by-side as `FACT3 Code Dev`
+- `preview`: persistent internal preview build, installable side-by-side as `FACT3 Code Preview`
+- `production`: store/release build as `FACT3 Code`
 
 Run commands from `apps/mobile`.
 

@@ -1,3 +1,5 @@
+import * as NodePath from "node:path";
+
 import { assert, describe, it } from "vite-plus/test";
 
 import {
@@ -59,11 +61,21 @@ describe("electron development launcher", () => {
     assert.equal(paths.launcherExecutableName, "T3 Code (Dev) Launcher");
     assert.equal(
       paths.launcherBinaryPath,
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/T3 Code (Dev) Launcher",
+      NodePath.join(
+        "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app",
+        "Contents",
+        "MacOS",
+        "T3 Code (Dev) Launcher",
+      ),
     );
     assert.equal(
       paths.runtimeElectronBinaryPath,
-      "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron",
+      NodePath.join(
+        "/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app",
+        "Contents",
+        "MacOS",
+        "Electron",
+      ),
     );
 
     const script = makeDevelopmentLauncherScript({
@@ -72,10 +84,7 @@ describe("electron development launcher", () => {
       desktopRoot: "/repo/apps/desktop",
       environment: {},
     });
-    assert.include(
-      script,
-      "exec '/repo/apps/desktop/.electron-runtime/T3 Code (Dev).app/Contents/MacOS/Electron'",
-    );
+    assert.include(script, `exec '${paths.runtimeElectronBinaryPath}'`);
     assert.notInclude(script, "node_modules/electron");
   });
 });

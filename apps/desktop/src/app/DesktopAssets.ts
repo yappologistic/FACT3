@@ -70,20 +70,25 @@ const resolveIconPath = Effect.fn("desktop.assets.resolveIconPath")(function* (
 > {
   const fileSystem = yield* FileSystem.FileSystem;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
-  if (environment.isDevelopment && environment.platform === "darwin" && ext === "png") {
-    const developmentDockIconPath = environment.developmentDockIconPath;
-    const developmentDockIconExists = yield* fileSystem.exists(developmentDockIconPath).pipe(
+  const developmentIconPath =
+    environment.isDevelopment && environment.platform === "darwin" && ext === "png"
+      ? environment.developmentDockIconPath
+      : environment.isDevelopment && environment.platform === "win32" && ext === "ico"
+        ? environment.path.join(environment.rootDir, "assets", "dev", "blueprint-windows.ico")
+        : null;
+  if (developmentIconPath !== null) {
+    const developmentIconExists = yield* fileSystem.exists(developmentIconPath).pipe(
       Effect.mapError(
         (cause) =>
           new DesktopAssetProbeError({
-            fileName: "icon.png",
-            candidatePath: developmentDockIconPath,
+            fileName: `icon.${ext}`,
+            candidatePath: developmentIconPath,
             cause,
           }),
       ),
     );
-    if (developmentDockIconExists) {
-      return Option.some(developmentDockIconPath);
+    if (developmentIconExists) {
+      return Option.some(developmentIconPath);
     }
   }
 
