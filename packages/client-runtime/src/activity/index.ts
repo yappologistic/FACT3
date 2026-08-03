@@ -36,6 +36,7 @@ export function deriveActiveSubagentCount(
   activeTurnId?: TurnId | null,
 ): number {
   const activeAgentIds = new Set<string>();
+  const knownAgentIds = new Set<string>();
   const activeFallbackCalls = new Set<string>();
 
   for (const activity of [...activities].toSorted(compareActivities)) {
@@ -66,17 +67,30 @@ export function deriveActiveSubagentCount(
     }
 
     const collab = asRecord(payload.collab);
+    if (callId && collab) {
+      // A provider may emit a sparse start event before the real collaboration
+      // snapshot. Once real child IDs arrive, the call placeholder must stop
+      // contributing to the count.
+      activeFallbackCalls.delete(callId);
+    }
     const dataItem = asRecord(asRecord(payload.data)?.item) ?? asRecord(payload.data);
     const rootAgentThreadId =
       dataItem?.type === "subAgentActivity" && dataItem.agentPath === "/root"
         ? asString(dataItem.agentThreadId)
         : null;
     const agentStates = asRecord(collab?.agentsStates);
+    const receiverThreadIds = Array.isArray(collab?.receiverThreadIds)
+      ? collab.receiverThreadIds.filter(
+          (value): value is string => asString(value) !== null && value !== rootAgentThreadId,
+        )
+      : [];
+    for (const agentId of receiverThreadIds) {
+      knownAgentIds.add(agentId);
+    }
     let hasAgentStateSnapshot = false;
     if (agentStates) {
       for (const [agentId, rawState] of Object.entries(agentStates)) {
-        if (agentId === rootAgentThreadId) {
-          activeAgentIds.delete(agentId);
+        if (agentId === rootAgentThreadId || !knownAgentIds.has(agentId)) {
           continue;
         }
         const status = asString(asRecord(rawState)?.status);
@@ -92,9 +106,6 @@ export function deriveActiveSubagentCount(
       }
     }
 
-    const receiverThreadIds = Array.isArray(collab?.receiverThreadIds)
-      ? collab.receiverThreadIds.filter((value): value is string => asString(value) !== null)
-      : [];
     const tool = asString(collab?.tool);
     if (!hasAgentStateSnapshot && receiverThreadIds.length > 0) {
       if (tool === "spawnAgent" || tool === "resumeAgent") {

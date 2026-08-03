@@ -147,6 +147,12 @@ function trimText(value: string | undefined | null): string | undefined {
   return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
+function asRecord(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Readonly<Record<string, unknown>>)
+    : undefined;
+}
+
 const FATAL_CODEX_STDERR_SNIPPETS = ["failed to connect to websocket"];
 
 function isFatalCodexProcessStderrMessage(message: string): boolean {
@@ -829,6 +835,38 @@ function mapToRuntimeEvents(
         type: "turn.diff.updated",
         payload: {
           unifiedDiff: payload.diff,
+        },
+      },
+    ];
+  }
+
+  if (event.method === "thread/settings/updated" && event.turnId && event.itemId) {
+    const payload = asRecord(event.payload);
+    const threadSettings = asRecord(payload?.threadSettings);
+    const agentThreadId =
+      typeof payload?.threadId === "string" ? trimText(payload.threadId) : undefined;
+    const model =
+      typeof threadSettings?.model === "string" ? trimText(threadSettings.model) : undefined;
+    const reasoningEffort =
+      typeof threadSettings?.effort === "string" ? trimText(threadSettings.effort) : undefined;
+    if (!agentThreadId || !model) return [];
+    return [
+      {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "item.updated",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          data: {
+            threadId: agentThreadId,
+            item: {
+              id: event.itemId,
+              type: "subAgentActivity",
+              kind: "started",
+              agentThreadId,
+              model,
+              ...(reasoningEffort ? { reasoningEffort } : {}),
+            },
+          },
         },
       },
     ];

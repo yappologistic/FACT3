@@ -71,6 +71,8 @@ describe("ComposerActivityStatus", () => {
         item={{
           id: "agent-3",
           name: "Desktop review",
+          model: "gpt-5.6-sol",
+          reasoningEffort: "xhigh",
           status: "completed",
           createdAt: "2026-08-02T00:00:00.000Z",
           result: "Review complete",
@@ -81,6 +83,10 @@ describe("ComposerActivityStatus", () => {
 
     expect(markup).toContain("/subagent-avatars/ribbon.webp");
     expect(markup).toContain('data-animated="true"');
+    expect(markup).toContain('data-subagent-runtime="true"');
+    expect(markup).toContain("GPT-5.6-Sol");
+    expect(markup).toContain("Extra High");
+    expect(markup).toContain("Model GPT-5.6-Sol, Extra High reasoning");
     expect(markup).not.toContain("lucide-check");
   });
 
@@ -99,8 +105,8 @@ describe("ComposerActivityStatus", () => {
     ];
     const markup = renderToStaticMarkup(
       <div>
-        {expectedTextures.map((_, index) => (
-          <SubagentAvatar index={index} key={index} />
+        {expectedTextures.map((texture, index) => (
+          <SubagentAvatar index={index} key={texture} />
         ))}
       </div>,
     );

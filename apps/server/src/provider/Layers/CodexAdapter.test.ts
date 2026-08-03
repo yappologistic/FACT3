@@ -699,6 +699,47 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("maps routed child settings to the existing sub-agent item", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-subagent-runtime-settings"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "thread/settings/updated",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("spawn_1"),
+        payload: {
+          threadId: "agent-1",
+          threadSettings: {
+            model: "gpt-5.6-terra",
+            effort: "medium",
+          },
+        },
+      });
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some" || firstEvent.value.type !== "item.updated") return;
+      NodeAssert.equal(firstEvent.value.itemId, "spawn_1");
+      NodeAssert.deepEqual(firstEvent.value.payload.data, {
+        threadId: "agent-1",
+        item: {
+          id: "spawn_1",
+          type: "subAgentActivity",
+          kind: "started",
+          agentThreadId: "agent-1",
+          model: "gpt-5.6-terra",
+          reasoningEffort: "medium",
+        },
+      });
+    }),
+  );
+
   it.effect("labels MCP lifecycle entries with server and tool names", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();

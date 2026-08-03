@@ -26,6 +26,8 @@ export interface ComposerToolActivityItem {
 export interface ComposerSubagentActivityItem {
   readonly id: string;
   readonly name: string;
+  readonly model?: string;
+  readonly reasoningEffort?: string;
   readonly status: ComposerActivityItemStatus;
   readonly prompt?: string;
   readonly result?: string;
@@ -56,6 +58,8 @@ interface LinkedSubagentMessage {
 interface MutableSubagentActivityItem {
   id: string;
   name: string | null;
+  model: string | null;
+  reasoningEffort: string | null;
   status: ComposerActivityItemStatus;
   prompt: string | null;
   result: string | null;
@@ -195,6 +199,8 @@ function ensureSubagent(
   const created: MutableSubagentActivityItem = {
     id,
     name: null,
+    model: null,
+    reasoningEffort: null,
     status: activity.kind === "tool.completed" ? "completed" : "running",
     prompt: null,
     result: null,
@@ -223,12 +229,13 @@ function deriveSubagents(
     const data = asRecord(payload?.data);
     const item = asRecord(data?.item) ?? data;
     const collab = asRecord(payload?.collab);
-    const callId = asString(payload?.toolCallId) ?? activity.id;
     const tool = asString(collab?.tool) ?? asString(item?.tool);
     const itemType = asString(item?.type);
     const agentThreadId = asString(item?.agentThreadId);
     const agentPath = asString(item?.agentPath);
     const prompt = asString(item?.prompt) ?? asString(collab?.prompt);
+    const model = asString(collab?.model) ?? asString(item?.model);
+    const reasoningEffort = asString(collab?.reasoningEffort) ?? asString(item?.reasoningEffort);
 
     const receiverIds = new Set([
       ...asStringArray(collab?.receiverThreadIds),
@@ -236,25 +243,14 @@ function deriveSubagents(
       ...(agentThreadId && agentPath !== "/root" ? [agentThreadId] : []),
     ]);
 
-    if (
-      receiverIds.size === 0 &&
-      collab === null &&
-      item === null &&
-      activity.kind === "tool.started"
-    ) {
-      receiverIds.add(callId);
-    }
-
     const collabPaths = asRecord(collab?.agentPaths);
     const collabStates = asRecord(collab?.agentsStates);
     const itemStates = asRecord(item?.agentsStates);
-    for (const id of new Set([
-      ...receiverIds,
-      ...Object.keys(collabStates ?? {}),
-      ...Object.keys(itemStates ?? {}),
-    ])) {
+    for (const id of receiverIds) {
       const target = ensureSubagent(byId, id, activity);
       if (prompt) target.prompt = prompt;
+      if (model) target.model = model;
+      if (reasoningEffort) target.reasoningEffort = reasoningEffort;
       const snapshotPath = asString(collabPaths?.[id]);
       if (snapshotPath && snapshotPath !== "/root") {
         target.name = displayAgentPath(snapshotPath);
@@ -299,6 +295,8 @@ function deriveSubagents(
   return [...byId.values()].map((agent, index) => ({
     id: agent.id,
     name: agent.name ?? `Sub-agent ${index + 1}`,
+    ...(agent.model ? { model: agent.model } : {}),
+    ...(agent.reasoningEffort ? { reasoningEffort: agent.reasoningEffort } : {}),
     status: agent.status,
     ...(agent.prompt ? { prompt: agent.prompt } : {}),
     ...(agent.result ? { result: agent.result } : {}),

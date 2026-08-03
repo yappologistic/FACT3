@@ -12,11 +12,8 @@ function formatPercentage(value: number | null): string | null {
   return `${Math.round(value)}%`;
 }
 
-export function ContextWindowMeter(props: {
-  usage: ContextWindowSnapshot;
-  providerDisplayName?: string | null;
-}) {
-  const { usage, providerDisplayName } = props;
+export function ContextWindowMeter(props: { usage: ContextWindowSnapshot }) {
+  const { usage } = props;
   const usedPercentage = formatPercentage(usage.usedPercentage);
   const normalizedPercentage = Math.max(0, Math.min(100, usage.usedPercentage ?? 0));
   const radius = 9.75;
@@ -125,11 +122,6 @@ export function ContextWindowMeter(props: {
               <span className="font-medium tabular-nums text-muted-foreground/80">
                 {formatContextWindowTokens(totalProcessedTokens)}
               </span>
-            </div>
-          ) : null}
-          {usage.compactsAutomatically ? (
-            <div className="mt-1 text-pretty text-[11px] font-medium text-muted-foreground/70">
-              {providerDisplayName ?? "It"} automatically compacts its context when needed.
             </div>
           ) : null}
         </div>

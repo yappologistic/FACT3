@@ -31,10 +31,14 @@ describe("runtimeEventToActivities collaboration metadata", () => {
             type: "collabAgentToolCall",
             tool: "spawnAgent",
             receiverThreadIds: ["agent-1", "agent-2"],
+            model: "gpt-5.6-sol",
+            reasoningEffort: "high",
             prompt: "Review the composer activity panel",
             agentsStates: {
               "agent-1": { status: "running", message: "Working" },
               "agent-2": { status: "pendingInit" },
+              "provider-root": { status: "running" },
+              "stale-agent": { status: "running" },
             },
           },
         },
@@ -49,6 +53,8 @@ describe("runtimeEventToActivities collaboration metadata", () => {
     expect(payload.collab).toEqual({
       tool: "spawnAgent",
       prompt: "Review the composer activity panel",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
       receiverThreadIds: ["agent-1", "agent-2"],
       agentsStates: {
         "agent-1": { status: "running", message: "Working" },
@@ -159,5 +165,40 @@ describe("runtimeEventToActivities collaboration metadata", () => {
         },
       }),
     ]);
+  });
+
+  it("retains effective runtime metadata added to a direct child marker", () => {
+    const activities = runtimeEventToActivities({
+      eventId: EventId.make("event-subagent-runtime"),
+      provider: ProviderDriverKind.make("codex"),
+      threadId: ThreadId.make("thread-1"),
+      turnId: TurnId.make("turn-1"),
+      itemId: RuntimeItemId.make("spawn-1"),
+      createdAt: "2026-08-02T00:00:00.000Z",
+      type: "item.updated",
+      payload: {
+        itemType: "collab_agent_tool_call",
+        data: {
+          item: {
+            type: "subAgentActivity",
+            kind: "started",
+            id: "spawn-1",
+            agentThreadId: "agent-1",
+            agentPath: "/root/terra_review",
+            model: "gpt-5.6-terra",
+            reasoningEffort: "medium",
+          },
+        },
+      },
+    });
+
+    expect(activities).toHaveLength(1);
+    expect(activities[0]?.payload).toMatchObject({
+      collab: {
+        model: "gpt-5.6-terra",
+        reasoningEffort: "medium",
+        receiverThreadIds: ["agent-1"],
+      },
+    });
   });
 });

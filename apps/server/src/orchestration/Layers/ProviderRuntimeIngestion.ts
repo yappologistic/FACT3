@@ -217,6 +217,8 @@ function buildCollabAgentActivitySnapshot(
   | {
       readonly tool?: string;
       readonly prompt?: string;
+      readonly model?: string;
+      readonly reasoningEffort?: string;
       readonly receiverThreadIds?: ReadonlyArray<string>;
       readonly agentPaths?: Readonly<Record<string, string>>;
       readonly agentsStates?: Readonly<
@@ -237,6 +239,11 @@ function buildCollabAgentActivitySnapshot(
     const agentThreadId = typeof item.agentThreadId === "string" ? item.agentThreadId : undefined;
     const kind = typeof item.kind === "string" ? item.kind : undefined;
     const agentPath = typeof item.agentPath === "string" ? item.agentPath : undefined;
+    const model = typeof item.model === "string" ? item.model.trim() || undefined : undefined;
+    const reasoningEffort =
+      typeof item.reasoningEffort === "string"
+        ? item.reasoningEffort.trim() || undefined
+        : undefined;
     // A child can report an interaction with the root agent. That is routing
     // metadata, not another spawned sub-agent, so it must not affect the count.
     if (!agentThreadId || !kind || agentPath === "/root") {
@@ -244,6 +251,8 @@ function buildCollabAgentActivitySnapshot(
     }
     return {
       tool: "spawnAgent",
+      ...(model ? { model } : {}),
+      ...(reasoningEffort ? { reasoningEffort } : {}),
       receiverThreadIds: [agentThreadId],
       ...(agentPath ? { agentPaths: { [agentThreadId]: agentPath } } : {}),
       agentsStates: {
@@ -254,13 +263,29 @@ function buildCollabAgentActivitySnapshot(
 
   const tool = typeof item.tool === "string" ? item.tool : undefined;
   const prompt = typeof item.prompt === "string" ? truncateDetail(item.prompt, 4_000) : undefined;
+  const model = typeof item.model === "string" ? item.model.trim() || undefined : undefined;
+  const reasoningEffort =
+    typeof item.reasoningEffort === "string" ? item.reasoningEffort.trim() || undefined : undefined;
   const receiverThreadIds = Array.isArray(item.receiverThreadIds)
-    ? item.receiverThreadIds.filter((value): value is string => typeof value === "string")
+    ? [
+        ...new Set(
+          item.receiverThreadIds.flatMap((value) =>
+            typeof value === "string" && value.trim().length > 0 ? [value] : [],
+          ),
+        ),
+      ]
     : undefined;
+  const receiverThreadIdSet = new Set(receiverThreadIds ?? []);
   const rawAgentStates = asUnknownRecord(item.agentsStates);
   const agentsStates: Record<string, { readonly status: string; readonly message?: string }> = {};
   if (rawAgentStates) {
     for (const [agentId, rawState] of Object.entries(rawAgentStates)) {
+      // Codex can include its broader collaboration state map here. Only the
+      // explicit targets belong to this call; treating every map key as a new
+      // child makes both the live and completed counts drift upward.
+      if (!receiverThreadIdSet.has(agentId)) {
+        continue;
+      }
       const stateRecord = asUnknownRecord(rawState);
       const status = stateRecord?.status;
       const message = stateRecord?.message;
@@ -276,6 +301,8 @@ function buildCollabAgentActivitySnapshot(
   if (
     !tool &&
     !prompt &&
+    !model &&
+    !reasoningEffort &&
     receiverThreadIds === undefined &&
     Object.keys(agentsStates).length === 0
   ) {
@@ -284,6 +311,8 @@ function buildCollabAgentActivitySnapshot(
   return {
     ...(tool ? { tool } : {}),
     ...(prompt ? { prompt } : {}),
+    ...(model ? { model } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     ...(receiverThreadIds !== undefined ? { receiverThreadIds } : {}),
     ...(Object.keys(agentsStates).length > 0 ? { agentsStates } : {}),
   };

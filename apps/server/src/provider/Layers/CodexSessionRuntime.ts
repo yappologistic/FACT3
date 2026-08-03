@@ -38,6 +38,10 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { buildCodexInitializeParams } from "./CodexProvider.ts";
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
+import {
+  readCodexThreadRuntimeMetadata,
+  type CodexThreadRuntimeMetadata,
+} from "./CodexThreadRuntimeMetadata.ts";
 import { expandHomePath } from "../../pathExpansion.ts";
 import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
 const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
@@ -500,6 +504,7 @@ function readNotificationThreadId(notification: CodexServerNotification): string
     case "thread/unarchived":
     case "thread/closed":
     case "thread/name/updated":
+    case "thread/settings/updated":
     case "thread/tokenUsage/updated":
     case "turn/started":
     case "hook/started":
@@ -766,6 +771,10 @@ export const makeCodexSessionRuntime = (
     // `child_process.spawn`; `expandHomePath` lets a configured
     // `CODEX_HOME=~/.codex_work` reach codex as an absolute path.
     const resolvedHomePath = options.homePath ? expandHomePath(options.homePath) : undefined;
+    const codexHomeRef = yield* Ref.make<string | undefined>(resolvedHomePath);
+    const subagentRuntimeMetadataRef = yield* Ref.make(
+      new Map<string, CodexThreadRuntimeMetadata>(),
+    );
     const env = {
       ...options.environment,
       ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
@@ -876,9 +885,28 @@ export const makeCodexSessionRuntime = (
         ),
       );
 
+    const loadSubagentRuntimeMetadata = (agentThreadId: string) =>
+      Effect.gen(function* () {
+        const cached = (yield* Ref.get(subagentRuntimeMetadataRef)).get(agentThreadId);
+        if (cached) return cached;
+        const codexHome = yield* Ref.get(codexHomeRef);
+        if (!codexHome) return undefined;
+        const metadata = yield* Effect.promise(() =>
+          readCodexThreadRuntimeMetadata(codexHome, agentThreadId),
+        );
+        if (metadata) {
+          yield* Ref.update(subagentRuntimeMetadataRef, (current) => {
+            const next = new Map(current);
+            next.set(agentThreadId, metadata);
+            return next;
+          });
+        }
+        return metadata;
+      });
+
     const handleRawNotification = (notification: CodexServerNotification) =>
       Effect.gen(function* () {
-        const payload = notification.params;
+        let payload: unknown = notification.params;
         const route = readRouteFields(notification);
         const collabReceiverTurns = yield* Ref.get(collabReceiverTurnsRef);
         const mainProviderThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
@@ -901,8 +929,44 @@ export const makeCodexSessionRuntime = (
           route.turnId,
           mainProviderThreadId,
         );
+
+        if (
+          (notification.method === "item/started" || notification.method === "item/completed") &&
+          notification.params.item.type === "subAgentActivity" &&
+          notification.params.item.agentPath !== "/root"
+        ) {
+          const metadata = yield* loadSubagentRuntimeMetadata(
+            notification.params.item.agentThreadId,
+          );
+          if (metadata) {
+            payload = {
+              ...notification.params,
+              item: {
+                ...notification.params.item,
+                model: metadata.model,
+                ...(metadata.reasoningEffort ? { reasoningEffort: metadata.reasoningEffort } : {}),
+              },
+            };
+          }
+        }
+
+        if (childRoute && notification.method === "thread/settings/updated") {
+          const metadata: CodexThreadRuntimeMetadata = {
+            model: notification.params.threadSettings.model,
+            ...(notification.params.threadSettings.effort
+              ? { reasoningEffort: notification.params.threadSettings.effort }
+              : {}),
+          };
+          yield* Ref.update(subagentRuntimeMetadataRef, (current) => {
+            const next = new Map(current);
+            next.set(notification.params.threadId, metadata);
+            return next;
+          });
+        }
+
         if (childRoute && notification.method === "turn/completed") {
           const agentThreadId = notification.params.threadId;
+          const metadata = yield* loadSubagentRuntimeMetadata(agentThreadId);
           collabReceiverTurns.delete(agentThreadId);
           yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
           yield* emitEvent({
@@ -921,6 +985,14 @@ export const makeCodexSessionRuntime = (
                 kind: "interrupted",
                 agentThreadId,
                 agentPath: childRoute.agentPath ?? agentThreadId,
+                ...(metadata
+                  ? {
+                      model: metadata.model,
+                      ...(metadata.reasoningEffort
+                        ? { reasoningEffort: metadata.reasoningEffort }
+                        : {}),
+                    }
+                  : {}),
               },
             },
           });
@@ -934,7 +1006,7 @@ export const makeCodexSessionRuntime = (
         let requestId: ApprovalRequestId | undefined;
         let requestKind: ProviderRequestKind | undefined;
         let turnId = childParentTurnId ?? route.turnId;
-        let itemId = route.itemId;
+        let itemId = route.itemId ?? childRoute?.itemId;
 
         if (notification.method === "serverRequest/resolved") {
           const rawRequestId =
@@ -1288,7 +1360,8 @@ export const makeCodexSessionRuntime = (
 
     const start = Effect.fn("CodexSessionRuntime.start")(function* () {
       yield* emitSessionEvent("session/connecting", "Starting Codex App Server session.");
-      yield* client.request("initialize", buildCodexInitializeParams());
+      const initialize = yield* client.request("initialize", buildCodexInitializeParams());
+      yield* Ref.set(codexHomeRef, initialize.codexHome);
       yield* client.notify("initialized", undefined);
 
       const requestedModel = normalizeCodexModelSlug(options.model);

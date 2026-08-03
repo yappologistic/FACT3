@@ -122,6 +122,7 @@ function ToolActivityIcon({ item }: { readonly item: ComposerToolActivityItem })
 
 function ActivityRowShell(props: {
   readonly title: string;
+  readonly titleAccessory?: ReactNode;
   readonly detail?: string;
   readonly status: ComposerActivityItemStatus;
   readonly leading: ReactNode;
@@ -138,8 +139,11 @@ function ActivityRowShell(props: {
         {props.leading}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] font-normal text-foreground/90">
-          {props.title}
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="min-w-0 truncate text-[13px] font-normal text-foreground/90">
+            {props.title}
+          </span>
+          {props.titleAccessory}
         </span>
         {props.detail ? (
           <span
@@ -189,6 +193,65 @@ function ActivityRowShell(props: {
         <div className="activity-panel-row-detail px-3 pb-3 pl-12">{props.children}</div>
       ) : null}
     </li>
+  );
+}
+
+function formatSubagentModel(model: string): string {
+  return model.replace(/^gpt-/iu, "GPT-").replace(/-(sol|terra|luna)$/iu, (_, family: string) => {
+    return `-${family.charAt(0).toUpperCase()}${family.slice(1).toLowerCase()}`;
+  });
+}
+
+const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
+  none: "None",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra High",
+  max: "Max",
+  ultra: "Ultra",
+};
+
+function formatReasoningEffort(reasoningEffort: string): string {
+  return REASONING_EFFORT_LABELS[reasoningEffort.toLowerCase()] ?? reasoningEffort;
+}
+
+function SubagentRuntimePill(props: {
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+}) {
+  if (!props.model && !props.reasoningEffort) return null;
+  const modelLabel = props.model ? formatSubagentModel(props.model) : null;
+  const reasoningLabel = props.reasoningEffort
+    ? formatReasoningEffort(props.reasoningEffort)
+    : null;
+  const accessibleLabel = [
+    modelLabel ? `Model ${modelLabel}` : null,
+    reasoningLabel ? `${reasoningLabel} reasoning` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  return (
+    <span
+      aria-label={accessibleLabel}
+      className="flex max-w-52 shrink-0 items-center overflow-hidden rounded-full border border-border/55 bg-foreground/[0.045] text-[10px] font-normal leading-4 text-muted-foreground"
+      data-subagent-runtime="true"
+      title={accessibleLabel}
+    >
+      {modelLabel ? <span className="truncate px-2 py-px">{modelLabel}</span> : null}
+      {reasoningLabel ? (
+        <span
+          className={cn(
+            "shrink-0 px-2 py-px",
+            modelLabel && "border-l border-border/50 text-muted-foreground/85",
+          )}
+        >
+          {reasoningLabel}
+        </span>
+      ) : null}
+    </span>
   );
 }
 
@@ -257,6 +320,12 @@ export const SubagentActivityRow = memo(function SubagentActivityRow(props: {
       onToggle={() => setExpanded((value) => !value)}
       status={props.item.status}
       title={props.item.name}
+      titleAccessory={
+        <SubagentRuntimePill
+          {...(props.item.model ? { model: props.item.model } : {})}
+          {...(props.item.reasoningEffort ? { reasoningEffort: props.item.reasoningEffort } : {})}
+        />
+      }
     >
       <div className="space-y-2 rounded-xl border border-border/45 bg-background/55 p-2.5 text-[11px] leading-4">
         <div>

@@ -122,6 +122,39 @@ describe("deriveActiveSubagentCount", () => {
     expect(deriveActiveSubagentCount(activities, turnId)).toBe(0);
   });
 
+  it("replaces sparse call placeholders and ignores unrelated agent-state entries", () => {
+    const activities = [
+      activity(
+        "spawn-start",
+        "tool.started",
+        { itemType: "collab_agent_tool_call", toolCallId: "spawn-call" },
+        1,
+      ),
+      activity(
+        "spawn-update",
+        "tool.updated",
+        {
+          itemType: "collab_agent_tool_call",
+          toolCallId: "spawn-call",
+          collab: {
+            tool: "spawnAgent",
+            receiverThreadIds: ["agent-1", "agent-2", "agent-3"],
+            agentsStates: {
+              "agent-1": { status: "running" },
+              "agent-2": { status: "running" },
+              "agent-3": { status: "pendingInit" },
+              "provider-root": { status: "running" },
+              "stale-agent": { status: "running" },
+            },
+          },
+        },
+        2,
+      ),
+    ];
+
+    expect(deriveActiveSubagentCount(activities, turnId)).toBe(3);
+  });
+
   it("does not count a child interaction with the root agent as a sub-agent", () => {
     const activities = [
       activity(

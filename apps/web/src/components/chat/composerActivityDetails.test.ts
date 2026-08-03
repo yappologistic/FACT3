@@ -71,9 +71,14 @@ describe("deriveComposerActivityDetails", () => {
             collab: {
               tool: "spawnAgent",
               prompt: "Review the composer interaction",
+              model: "gpt-5.6-sol",
+              reasoningEffort: "high",
               receiverThreadIds: ["agent-1"],
               agentPaths: { "agent-1": "/root/interaction_review" },
-              agentsStates: { "agent-1": { status: "running" } },
+              agentsStates: {
+                "agent-1": { status: "running" },
+                "stale-agent": { status: "running" },
+              },
             },
           },
           sequence: 1,
@@ -103,11 +108,14 @@ describe("deriveComposerActivityDetails", () => {
       expect.objectContaining({
         id: "agent-1",
         name: "Interaction review",
+        model: "gpt-5.6-sol",
+        reasoningEffort: "high",
         prompt: "Review the composer interaction",
         result: "Interaction verified.",
         status: "completed",
       }),
     ]);
+    expect(details.subagents).toHaveLength(1);
   });
 
   it("shows live plan task states", () => {
@@ -122,6 +130,31 @@ describe("deriveComposerActivityDetails", () => {
     });
 
     expect(details.tasks.map((task) => task.status)).toEqual(["completed", "running", "pending"]);
+  });
+
+  it("does not label a child with unconfirmed parent runtime values", () => {
+    const details = deriveComposerActivityDetails(
+      [
+        makeActivity({
+          id: "agent-start",
+          kind: "tool.started",
+          payload: {
+            itemType: "collab_agent_tool_call",
+            collab: {
+              tool: "spawnAgent",
+              receiverThreadIds: ["agent-1"],
+              agentsStates: { "agent-1": { status: "running" } },
+            },
+          },
+          sequence: 1,
+        }),
+      ],
+      TurnId.make("turn-1"),
+      null,
+    );
+
+    expect(details.subagents[0]).not.toHaveProperty("model");
+    expect(details.subagents[0]).not.toHaveProperty("reasoningEffort");
   });
 
   it("folds Codex child final messages into completed sub-agent results", () => {
