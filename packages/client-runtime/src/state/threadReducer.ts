@@ -52,6 +52,7 @@ export function applyThreadDetailEvent(
     // ── Project events (irrelevant to thread detail) ────────────────
     case "project.created":
     case "project.meta-updated":
+    case "project.automation-configured":
     case "project.deleted":
       return { kind: "unchanged" };
 
@@ -186,6 +187,17 @@ export function applyThreadDetailEvent(
         thread: {
           ...thread,
           interactionMode: event.payload.interactionMode,
+          updatedAt: event.payload.updatedAt,
+        },
+      };
+
+    case "thread.automation-configured":
+    case "thread.automation-transitioned":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          automation: event.payload.automation,
           updatedAt: event.payload.updatedAt,
         },
       };

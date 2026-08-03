@@ -4,6 +4,7 @@ import { Atom } from "effect/unstable/reactivity";
 import { createAtomCommandScheduler, createEnvironmentCommand } from "./runtime.ts";
 import {
   type ArchiveThreadInput,
+  type ConfigureThreadAutomationInput,
   type CreateThreadInput,
   type DeleteThreadInput,
   type InterruptThreadTurnInput,
@@ -20,7 +21,9 @@ import {
   type UnsettleThreadInput,
   type UnsnoozeThreadInput,
   type UpdateThreadMetadataInput,
+  type TransitionThreadAutomationInput,
   archiveThread,
+  configureThreadAutomation,
   createThread,
   deleteThread,
   interruptThreadTurn,
@@ -37,11 +40,13 @@ import {
   unsettleThread,
   unsnoozeThread,
   updateThreadMetadata,
+  transitionThreadAutomation,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 
 export type {
   ArchiveThreadInput,
+  ConfigureThreadAutomationInput,
   CreateThreadInput,
   DeleteThreadInput,
   InterruptThreadTurnInput,
@@ -58,6 +63,7 @@ export type {
   UnsettleThreadInput,
   UnsnoozeThreadInput,
   UpdateThreadMetadataInput,
+  TransitionThreadAutomationInput,
 } from "../operations/commands.ts";
 
 export function createThreadEnvironmentAtoms<R, E>(
@@ -169,6 +175,18 @@ export function createThreadEnvironmentAtoms<R, E>(
     stopSession: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:stop-session",
       execute: (input: StopThreadSessionInput) => stopThreadSession(input),
+      scheduler,
+      concurrency,
+    }),
+    configureAutomation: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:configure-automation",
+      execute: (input: ConfigureThreadAutomationInput) => configureThreadAutomation(input),
+      scheduler,
+      concurrency,
+    }),
+    transitionAutomation: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:transition-automation",
+      execute: (input: TransitionThreadAutomationInput) => transitionThreadAutomation(input),
       scheduler,
       concurrency,
     }),

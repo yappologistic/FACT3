@@ -4,10 +4,13 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   classifyKanbanThread,
+  describeEmptyKanbanActivity,
   describeKanbanThreadState,
   firstUserGoal,
   groupKanbanThreads,
+  incompleteAutomationDependencies,
   latestCheckpointSummary,
+  liveKanbanAutomation,
 } from "./KanbanBoard.logic";
 
 const NOW = "2026-08-03T10:00:00.000Z";
@@ -41,7 +44,150 @@ function thread(
   };
 }
 
+function automation(): NonNullable<EnvironmentThreadShell["automation"]> {
+  return {
+    goal: "Ship the board",
+    acceptanceCriteria: [],
+    dependencies: [],
+    baseBranch: "main",
+    stage: "ready",
+    phase: "implementation",
+    attempt: 0,
+    maxAttempts: 2,
+    maxRuntimeMinutes: 60,
+    leaseExpiresAt: null,
+    lastHeartbeatAt: null,
+    lastError: null,
+    feedback: null,
+    verification: { status: "pending", summary: null, completedAt: null },
+    startedAt: null,
+    completedAt: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+  };
+}
+
 describe("Kanban board lifecycle", () => {
+  it("prefers the live shell automation over a stale cached detail", () => {
+    const stale = {
+      goal: "Ship the board",
+      acceptanceCriteria: [],
+      dependencies: [],
+      baseBranch: "main",
+      stage: "running" as const,
+      phase: "verification" as const,
+      attempt: 1,
+      maxAttempts: 2,
+      maxRuntimeMinutes: 60,
+      leaseExpiresAt: null,
+      lastHeartbeatAt: NOW,
+      lastError: null,
+      feedback: null,
+      verification: { status: "running" as const, summary: null, completedAt: null },
+      startedAt: NOW,
+      completedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const live = {
+      ...stale,
+      stage: "review" as const,
+      verification: {
+        status: "passed" as const,
+        summary: "Verification passed.",
+        completedAt: NOW,
+      },
+    };
+
+    expect(liveKanbanAutomation({ automation: live }, { automation: stale })).toBe(live);
+  });
+
+  it("maps durable automation stages to purposeful board lanes", () => {
+    const automation = {
+      goal: "Ship the board",
+      acceptanceCriteria: [],
+      dependencies: [],
+      baseBranch: "main",
+      phase: "implementation" as const,
+      attempt: 0,
+      maxAttempts: 2,
+      maxRuntimeMinutes: 60,
+      leaseExpiresAt: null,
+      lastHeartbeatAt: null,
+      lastError: null,
+      feedback: null,
+      verification: { status: "pending" as const, summary: null, completedAt: null },
+      startedAt: null,
+      completedAt: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+    };
+    const queued = thread({
+      id: ThreadId.make("queued"),
+      automation: { ...automation, stage: "ready" },
+    });
+    const needsInput = thread({
+      id: ThreadId.make("needs-input"),
+      automation: { ...automation, stage: "needs-input" },
+    });
+    const review = thread({
+      id: ThreadId.make("review"),
+      automation: { ...automation, stage: "review" },
+    });
+
+    expect(classifyKanbanThread(queued, NOW)).toBe("queue");
+    expect(classifyKanbanThread(needsInput, NOW)).toBe("attention");
+    expect(classifyKanbanThread(review, NOW)).toBe("review");
+    expect(describeKanbanThreadState(queued)).toBe("Queued");
+  });
+
+  it("keeps a queued task blocked until all configured dependencies complete", () => {
+    const dependency = thread({
+      id: ThreadId.make("dependency"),
+      automation: {
+        goal: "Build dependency",
+        acceptanceCriteria: [],
+        dependencies: [],
+        baseBranch: "main",
+        stage: "running",
+        phase: "implementation",
+        attempt: 1,
+        maxAttempts: 2,
+        maxRuntimeMinutes: 60,
+        leaseExpiresAt: null,
+        lastHeartbeatAt: NOW,
+        lastError: null,
+        feedback: null,
+        verification: { status: "pending", summary: null, completedAt: null },
+        startedAt: NOW,
+        completedAt: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    });
+    const dependent = thread({
+      id: ThreadId.make("dependent"),
+      automation: {
+        ...dependency.automation!,
+        goal: "Build dependent",
+        stage: "ready",
+        attempt: 0,
+        dependencies: [dependency.id],
+      },
+    });
+
+    expect(incompleteAutomationDependencies(dependent, [dependency, dependent])).toEqual([
+      dependency,
+    ]);
+    const completedDependency = {
+      ...dependency,
+      automation: { ...dependency.automation!, stage: "complete" as const },
+    };
+    expect(incompleteAutomationDependencies(dependent, [completedDependency, dependent])).toEqual(
+      [],
+    );
+  });
+
   it("keeps live and waiting threads in Running", () => {
     const live = thread({
       id: ThreadId.make("live"),
@@ -98,6 +244,15 @@ describe("Kanban board summaries", () => {
     ).toEqual({ files: 2, additions: 58, deletions: 2 });
   });
 
+  it("keeps the latest meaningful changes when verification changes no files", () => {
+    expect(
+      latestCheckpointSummary([
+        { files: [{ path: "utility.ts", additions: 12, deletions: 1 }] },
+        { files: [] },
+      ]),
+    ).toEqual({ files: 1, additions: 12, deletions: 1 });
+  });
+
   it("uses the first non-empty user message as the task goal", () => {
     expect(
       firstUserGoal([
@@ -106,5 +261,15 @@ describe("Kanban board summaries", () => {
         { role: "user", text: "Later follow-up" },
       ]),
     ).toBe("Build the project board.");
+  });
+
+  it("explains empty activity from durable lifecycle state", () => {
+    expect(describeEmptyKanbanActivity({ ...automation(), stage: "cancelled" })).toBe(
+      "Run cancelled. Earlier changes remain available below.",
+    );
+    expect(describeEmptyKanbanActivity({ ...automation(), stage: "ready" })).toBe(
+      "Waiting for Autopilot to start this task.",
+    );
+    expect(describeEmptyKanbanActivity(undefined)).toBe("No activity has been recorded yet.");
   });
 });

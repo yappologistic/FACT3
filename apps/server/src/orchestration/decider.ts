@@ -3,6 +3,8 @@ import {
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type ProjectId,
+  type ThreadId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
@@ -28,6 +30,61 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 // window is a failed/stale start, not pending work. Mirrors the client's
 // QUEUED_TURN_START_GRACE_MS in client-runtime threadSettled.ts.
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
+
+const AUTOMATION_STAGE_TRANSITIONS: Readonly<Record<string, ReadonlySet<string>>> = {
+  planned: new Set(["planned", "ready", "cancelled"]),
+  ready: new Set(["planned", "ready", "running", "failed", "cancelled"]),
+  running: new Set(["running", "needs-input", "review", "complete", "failed", "cancelled"]),
+  "needs-input": new Set(["needs-input", "running", "ready", "failed", "cancelled"]),
+  review: new Set(["review", "ready", "complete", "cancelled"]),
+  complete: new Set(["complete", "ready"]),
+  failed: new Set(["failed", "ready", "cancelled"]),
+  cancelled: new Set(["cancelled", "ready"]),
+};
+
+function automationDependenciesAreValid(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly threadId: ThreadId;
+  readonly projectId: ProjectId;
+  readonly dependencies: ReadonlyArray<ThreadId>;
+}): string | null {
+  const unique = new Set(input.dependencies);
+  if (unique.size !== input.dependencies.length) {
+    return "Automation dependencies must be unique.";
+  }
+  if (unique.has(input.threadId)) {
+    return "An automated task cannot depend on itself.";
+  }
+  for (const dependencyId of unique) {
+    const dependency = input.readModel.threads.find(
+      (thread) => thread.id === dependencyId && thread.deletedAt === null,
+    );
+    if (!dependency || dependency.projectId !== input.projectId) {
+      return `Dependency '${dependencyId}' is not an active task in this project.`;
+    }
+  }
+
+  const dependenciesByThread = new Map(
+    input.readModel.threads.flatMap((thread) =>
+      thread.automation ? [[thread.id, thread.automation.dependencies] as const] : [],
+    ),
+  );
+  dependenciesByThread.set(input.threadId, input.dependencies);
+  const visiting = new Set<ThreadId>();
+  const visited = new Set<ThreadId>();
+  const visitsCycle = (threadId: ThreadId): boolean => {
+    if (visiting.has(threadId)) return true;
+    if (visited.has(threadId)) return false;
+    visiting.add(threadId);
+    for (const dependencyId of dependenciesByThread.get(threadId) ?? []) {
+      if (visitsCycle(dependencyId)) return true;
+    }
+    visiting.delete(threadId);
+    visited.add(threadId);
+    return false;
+  };
+  return visitsCycle(input.threadId) ? "Automation dependencies cannot contain a cycle." : null;
+}
 
 /**
  * Blocked-on-you work derived from the thread's retained activities: an
@@ -288,6 +345,29 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             ? { defaultModelSelection: command.defaultModelSelection }
             : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "project.automation.configure": {
+      yield* requireProject({
+        readModel,
+        command,
+        projectId: command.projectId,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "project",
+          aggregateId: command.projectId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "project.automation-configured",
+        payload: {
+          projectId: command.projectId,
+          policy: command.policy,
           updatedAt: occurredAt,
         },
       };
@@ -743,6 +823,102 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           threadId: command.threadId,
           interactionMode: command.interactionMode,
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.automation.configure": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const dependencyError = automationDependenciesAreValid({
+        readModel,
+        threadId: thread.id,
+        projectId: thread.projectId,
+        dependencies: command.automation.dependencies,
+      });
+      if (dependencyError !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: dependencyError,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.automation-configured",
+        payload: {
+          threadId: command.threadId,
+          automation: {
+            ...command.automation,
+            updatedAt: occurredAt,
+          },
+          updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.automation.transition": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const automation = thread.automation;
+      if (!automation) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${thread.id}' is not configured for automation.`,
+        });
+      }
+      if (command.expectedStage !== undefined && automation.stage !== command.expectedStage) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${thread.id}' moved from '${command.expectedStage}' to '${automation.stage}' before this transition.`,
+        });
+      }
+      if (!AUTOMATION_STAGE_TRANSITIONS[automation.stage]!.has(command.stage)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Automation cannot move from '${automation.stage}' to '${command.stage}'.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      const nextAutomation = {
+        ...automation,
+        stage: command.stage,
+        ...(command.phase !== undefined ? { phase: command.phase } : {}),
+        ...(command.attempt !== undefined ? { attempt: command.attempt } : {}),
+        ...(command.leaseExpiresAt !== undefined ? { leaseExpiresAt: command.leaseExpiresAt } : {}),
+        ...(command.lastHeartbeatAt !== undefined
+          ? { lastHeartbeatAt: command.lastHeartbeatAt }
+          : {}),
+        ...(command.lastError !== undefined ? { lastError: command.lastError } : {}),
+        ...(command.feedback !== undefined ? { feedback: command.feedback } : {}),
+        ...(command.verification !== undefined ? { verification: command.verification } : {}),
+        ...(command.startedAt !== undefined ? { startedAt: command.startedAt } : {}),
+        ...(command.completedAt !== undefined ? { completedAt: command.completedAt } : {}),
+        updatedAt: occurredAt,
+      };
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.automation-transitioned",
+        payload: {
+          threadId: command.threadId,
+          automation: nextAutomation,
           updatedAt: occurredAt,
         },
       };

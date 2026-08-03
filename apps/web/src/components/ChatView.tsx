@@ -1150,6 +1150,7 @@ function ChatViewContent(props: ChatViewProps) {
   } = props;
   const [workspaceView, setWorkspaceView] = useState<WorkspaceView>("chat");
   const [kanbanHistoryOpen, setKanbanHistoryOpen] = useState(false);
+  const [kanbanNewTaskOpen, setKanbanNewTaskOpen] = useState(false);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const threadSyncPhase = routeKind === "server" ? (props.threadSyncPhase ?? null) : null;
   const threadDetailLoading = threadSyncPhase === "loading";
@@ -1643,10 +1644,10 @@ function ChatViewContent(props: ChatViewProps) {
   const handleNewThreadInActiveProject = useCallback(() => {
     startNewThreadForProject(activeProjectRef, handleNewThread);
   }, [activeProjectRef, handleNewThread]);
-  const handleNewWorktreeInActiveProject = useCallback(() => {
+  const handleNewKanbanTask = useCallback(() => {
     if (!activeProjectRef) return;
-    void handleNewThread(activeProjectRef, { envMode: "worktree" });
-  }, [activeProjectRef, handleNewThread]);
+    setKanbanNewTaskOpen(true);
+  }, [activeProjectRef]);
   const handleOpenKanbanThread = useCallback(
     (thread: ThreadShell) => {
       setWorkspaceView("chat");
@@ -5854,7 +5855,7 @@ function ChatViewContent(props: ChatViewProps) {
             }}
             kanbanHistoryOpen={kanbanHistoryOpen}
             onKanbanHistoryOpenChange={setKanbanHistoryOpen}
-            onNewWorktree={handleNewWorktreeInActiveProject}
+            onNewTask={handleNewKanbanTask}
           />
         </header>
 
@@ -5873,6 +5874,10 @@ function ChatViewContent(props: ChatViewProps) {
               archivedThreadsError={archivedThreadSnapshots.error}
               onRefreshArchivedThreads={archivedThreadSnapshots.refresh}
               historyOpen={kanbanHistoryOpen}
+              newTaskOpen={kanbanNewTaskOpen}
+              onNewTaskOpenChange={setKanbanNewTaskOpen}
+              baseBranch={activeThread.branch ?? "main"}
+              modelSelection={activeProject.defaultModelSelection ?? activeThread.modelSelection}
               onOpenThread={handleOpenKanbanThread}
               onOpenDiff={handleOpenKanbanDiff}
             />

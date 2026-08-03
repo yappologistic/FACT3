@@ -12,9 +12,12 @@ import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "
 import {
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
+  ProjectAutomationConfiguredPayload,
   ProjectDeletedPayload,
   ProjectMetaUpdatedPayload,
   ThreadActivityAppendedPayload,
+  ThreadAutomationConfiguredPayload,
+  ThreadAutomationTransitionedPayload,
   ThreadArchivedPayload,
   ThreadCreatedPayload,
   ThreadDeletedPayload,
@@ -244,6 +247,27 @@ export function projectEvent(
                     ? { defaultModelSelection: payload.defaultModelSelection }
                     : {}),
                   ...(payload.scripts !== undefined ? { scripts: payload.scripts } : {}),
+                  updatedAt: payload.updatedAt,
+                }
+              : project,
+          ),
+        })),
+      );
+
+    case "project.automation-configured":
+      return decodeForEvent(
+        ProjectAutomationConfiguredPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          projects: nextBase.projects.map((project) =>
+            project.id === payload.projectId
+              ? {
+                  ...project,
+                  automationPolicy: payload.policy,
                   updatedAt: payload.updatedAt,
                 }
               : project,
@@ -750,6 +774,38 @@ export function projectEvent(
             }),
           };
         }),
+      );
+
+    case "thread.automation-configured":
+      return decodeForEvent(
+        ThreadAutomationConfiguredPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            automation: payload.automation,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.automation-transitioned":
+      return decodeForEvent(
+        ThreadAutomationTransitionedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            automation: payload.automation,
+            updatedAt: payload.updatedAt,
+          }),
+        })),
       );
 
     default:

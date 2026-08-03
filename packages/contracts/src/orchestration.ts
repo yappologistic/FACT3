@@ -14,6 +14,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  PositiveInt,
   ProjectId,
   ProviderItemId,
   ThreadId,
@@ -210,6 +211,71 @@ export const ProjectScript = Schema.Struct({
 });
 export type ProjectScript = typeof ProjectScript.Type;
 
+export const OrchestrationAutomationDeliveryMode = Schema.Literals([
+  "local-commit",
+  "push-branch",
+  "pull-request",
+]);
+export type OrchestrationAutomationDeliveryMode = typeof OrchestrationAutomationDeliveryMode.Type;
+
+export const OrchestrationProjectAutomationPolicy = Schema.Struct({
+  enabled: Schema.Boolean,
+  maxConcurrentRuns: PositiveInt.check(Schema.isLessThanOrEqualTo(8)),
+  defaultMaxAttempts: PositiveInt.check(Schema.isLessThanOrEqualTo(5)),
+  defaultMaxRuntimeMinutes: PositiveInt.check(Schema.isLessThanOrEqualTo(24 * 60)),
+  createWorktrees: Schema.Boolean,
+  requireVerification: Schema.Boolean,
+  requireReview: Schema.Boolean,
+  deliveryMode: OrchestrationAutomationDeliveryMode,
+});
+export type OrchestrationProjectAutomationPolicy = typeof OrchestrationProjectAutomationPolicy.Type;
+
+export const OrchestrationAutomationStage = Schema.Literals([
+  "planned",
+  "ready",
+  "running",
+  "needs-input",
+  "review",
+  "complete",
+  "failed",
+  "cancelled",
+]);
+export type OrchestrationAutomationStage = typeof OrchestrationAutomationStage.Type;
+
+export const OrchestrationAutomationPhase = Schema.Literals(["implementation", "verification"]);
+export type OrchestrationAutomationPhase = typeof OrchestrationAutomationPhase.Type;
+
+export const OrchestrationAutomationVerification = Schema.Struct({
+  status: Schema.Literals(["pending", "running", "passed", "failed"]),
+  summary: Schema.NullOr(TrimmedNonEmptyString),
+  completedAt: Schema.NullOr(IsoDateTime),
+});
+export type OrchestrationAutomationVerification = typeof OrchestrationAutomationVerification.Type;
+
+export const OrchestrationThreadAutomation = Schema.Struct({
+  goal: TrimmedNonEmptyString.check(Schema.isMaxLength(20_000)),
+  acceptanceCriteria: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(2_000))).check(
+    Schema.isMaxLength(24),
+  ),
+  dependencies: Schema.Array(ThreadId).check(Schema.isMaxLength(32)),
+  baseBranch: TrimmedNonEmptyString,
+  stage: OrchestrationAutomationStage,
+  phase: OrchestrationAutomationPhase,
+  attempt: NonNegativeInt,
+  maxAttempts: PositiveInt.check(Schema.isLessThanOrEqualTo(5)),
+  maxRuntimeMinutes: PositiveInt.check(Schema.isLessThanOrEqualTo(24 * 60)),
+  leaseExpiresAt: Schema.NullOr(IsoDateTime),
+  lastHeartbeatAt: Schema.NullOr(IsoDateTime),
+  lastError: Schema.NullOr(TrimmedNonEmptyString),
+  feedback: Schema.NullOr(TrimmedNonEmptyString),
+  verification: OrchestrationAutomationVerification,
+  startedAt: Schema.NullOr(IsoDateTime),
+  completedAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type OrchestrationThreadAutomation = typeof OrchestrationThreadAutomation.Type;
+
 export const OrchestrationProject = Schema.Struct({
   id: ProjectId,
   title: TrimmedNonEmptyString,
@@ -217,6 +283,7 @@ export const OrchestrationProject = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  automationPolicy: Schema.optional(OrchestrationProjectAutomationPolicy),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -384,6 +451,7 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  automation: Schema.optional(OrchestrationThreadAutomation),
 });
 export type OrchestrationThread = typeof OrchestrationThread.Type;
 
@@ -402,6 +470,7 @@ export const OrchestrationProjectShell = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.NullOr(ModelSelection),
   scripts: Schema.Array(ProjectScript),
+  automationPolicy: Schema.optional(OrchestrationProjectAutomationPolicy),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -434,6 +503,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  automation: Schema.optional(OrchestrationThreadAutomation),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;
 
@@ -542,6 +612,14 @@ const ProjectMetaUpdateCommand = Schema.Struct({
   workspaceRoot: Schema.optional(TrimmedNonEmptyString),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+});
+
+const ProjectAutomationConfigureCommand = Schema.Struct({
+  type: Schema.Literal("project.automation.configure"),
+  commandId: CommandId,
+  projectId: ProjectId,
+  policy: OrchestrationProjectAutomationPolicy,
+  updatedAt: IsoDateTime,
 });
 
 const ProjectDeleteCommand = Schema.Struct({
@@ -763,9 +841,36 @@ const ThreadSessionStopCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadAutomationConfigureCommand = Schema.Struct({
+  type: Schema.Literal("thread.automation.configure"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  automation: OrchestrationThreadAutomation,
+  updatedAt: IsoDateTime,
+});
+
+const ThreadAutomationTransitionCommand = Schema.Struct({
+  type: Schema.Literal("thread.automation.transition"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  expectedStage: Schema.optional(OrchestrationAutomationStage),
+  stage: OrchestrationAutomationStage,
+  phase: Schema.optional(OrchestrationAutomationPhase),
+  attempt: Schema.optional(NonNegativeInt),
+  leaseExpiresAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  lastHeartbeatAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  lastError: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  feedback: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+  verification: Schema.optional(OrchestrationAutomationVerification),
+  startedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  completedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
+  updatedAt: IsoDateTime,
+});
+
 const DispatchableClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
+  ProjectAutomationConfigureCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
@@ -784,6 +889,8 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadAutomationConfigureCommand,
+  ThreadAutomationTransitionCommand,
 ]);
 export type DispatchableClientOrchestrationCommand =
   typeof DispatchableClientOrchestrationCommand.Type;
@@ -791,6 +898,7 @@ export type DispatchableClientOrchestrationCommand =
 export const ClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
+  ProjectAutomationConfigureCommand,
   ProjectDeleteCommand,
   ThreadCreateCommand,
   ThreadDeleteCommand,
@@ -809,6 +917,8 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadUserInputRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
+  ThreadAutomationConfigureCommand,
+  ThreadAutomationTransitionCommand,
 ]);
 export type ClientOrchestrationCommand = typeof ClientOrchestrationCommand.Type;
 
@@ -906,6 +1016,7 @@ export type OrchestrationCommand = typeof OrchestrationCommand.Type;
 export const OrchestrationEventType = Schema.Literals([
   "project.created",
   "project.meta-updated",
+  "project.automation-configured",
   "project.deleted",
   "thread.created",
   "thread.deleted",
@@ -930,6 +1041,8 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.automation-configured",
+  "thread.automation-transitioned",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -955,6 +1068,12 @@ export const ProjectMetaUpdatedPayload = Schema.Struct({
   repositoryIdentity: Schema.optional(Schema.NullOr(RepositoryIdentity)),
   defaultModelSelection: Schema.optional(Schema.NullOr(ModelSelection)),
   scripts: Schema.optional(Schema.Array(ProjectScript)),
+  updatedAt: IsoDateTime,
+});
+
+export const ProjectAutomationConfiguredPayload = Schema.Struct({
+  projectId: ProjectId,
+  policy: OrchestrationProjectAutomationPolicy,
   updatedAt: IsoDateTime,
 });
 
@@ -1140,6 +1259,18 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   activity: OrchestrationThreadActivity,
 });
 
+export const ThreadAutomationConfiguredPayload = Schema.Struct({
+  threadId: ThreadId,
+  automation: OrchestrationThreadAutomation,
+  updatedAt: IsoDateTime,
+});
+
+export const ThreadAutomationTransitionedPayload = Schema.Struct({
+  threadId: ThreadId,
+  automation: OrchestrationThreadAutomation,
+  updatedAt: IsoDateTime,
+});
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -1171,6 +1302,11 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("project.meta-updated"),
     payload: ProjectMetaUpdatedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("project.automation-configured"),
+    payload: ProjectAutomationConfiguredPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
@@ -1291,6 +1427,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.automation-configured"),
+    payload: ThreadAutomationConfiguredPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.automation-transitioned"),
+    payload: ThreadAutomationTransitionedPayload,
   }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;

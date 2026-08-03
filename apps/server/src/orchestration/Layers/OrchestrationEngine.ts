@@ -63,6 +63,7 @@ function commandToAggregateRef(command: OrchestrationCommand): {
   switch (command.type) {
     case "project.create":
     case "project.meta.update":
+    case "project.automation.configure":
     case "project.delete":
       return {
         aggregateKind: "project",

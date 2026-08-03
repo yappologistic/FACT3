@@ -10,9 +10,11 @@ import {
 } from "./runtime.ts";
 import {
   type CreateProjectInput,
+  type ConfigureProjectAutomationInput,
   type DeleteProjectInput,
   type UpdateProjectInput,
   createProject,
+  configureProjectAutomation,
   deleteProject,
   updateProject,
 } from "../operations/commands.ts";
@@ -20,6 +22,7 @@ import type { EnvironmentRegistry } from "../connection/registry.ts";
 
 export type {
   CreateProjectInput,
+  ConfigureProjectAutomationInput,
   DeleteProjectInput,
   UpdateProjectInput,
 } from "../operations/commands.ts";
@@ -83,6 +86,12 @@ export function createProjectEnvironmentAtoms<R, E>(
     update: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:project:update",
       execute: (input: UpdateProjectInput) => updateProject(input),
+      scheduler: projectScheduler,
+      concurrency: projectConcurrency,
+    }),
+    configureAutomation: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:project:configure-automation",
+      execute: (input: ConfigureProjectAutomationInput) => configureProjectAutomation(input),
       scheduler: projectScheduler,
       concurrency: projectConcurrency,
     }),

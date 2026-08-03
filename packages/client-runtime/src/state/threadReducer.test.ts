@@ -805,6 +805,65 @@ describe("applyThreadDetailEvent", () => {
     });
   });
 
+  describe("thread automation", () => {
+    it("keeps a loaded task detail synchronized with lifecycle transitions", () => {
+      const pendingAutomation = {
+        goal: "Ship the utility",
+        acceptanceCriteria: ["Focused tests pass"],
+        dependencies: [],
+        baseBranch: "main",
+        stage: "running" as const,
+        phase: "verification" as const,
+        attempt: 1,
+        maxAttempts: 2,
+        maxRuntimeMinutes: 60,
+        leaseExpiresAt: null,
+        lastHeartbeatAt: "2026-04-01T12:00:00.000Z",
+        lastError: null,
+        feedback: null,
+        verification: { status: "running" as const, summary: null, completedAt: null },
+        startedAt: "2026-04-01T11:00:00.000Z",
+        completedAt: null,
+        createdAt: "2026-04-01T10:00:00.000Z",
+        updatedAt: "2026-04-01T12:00:00.000Z",
+      };
+      const completedAt = "2026-04-01T12:05:00.000Z";
+      const result = applyThreadDetailEvent(
+        { ...baseThread, automation: pendingAutomation },
+        {
+          ...baseEventFields,
+          sequence: 15,
+          occurredAt: completedAt,
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.automation-transitioned",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            automation: {
+              ...pendingAutomation,
+              stage: "review",
+              verification: {
+                status: "passed",
+                summary: "Verification passed.",
+                completedAt,
+              },
+              completedAt,
+              updatedAt: completedAt,
+            },
+            updatedAt: completedAt,
+          },
+        },
+      );
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.automation?.stage).toBe("review");
+        expect(result.thread.automation?.verification.status).toBe("passed");
+        expect(result.thread.updatedAt).toBe(completedAt);
+      }
+    });
+  });
+
   describe("no-op events", () => {
     it("returns unchanged for approval-response-requested", () => {
       const result = applyThreadDetailEvent(baseThread, {

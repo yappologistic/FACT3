@@ -1,35 +1,54 @@
 # Kanban board
 
-The project board gives you one place to follow several coding tasks that are running in separate
-worktrees. It uses the same threads, checkpoints, and source-control state as Chat, so moving
-between the two views does not create a second copy of the work.
+The project board is a control surface for autonomous coding work. Each task is a real FACT3
+thread with its own goal, acceptance criteria, model, source-control state, and optional isolated
+worktree. Board and Chat show the same durable work, so you can move between overview and detail
+without creating a second copy of anything.
 
 Select **Board** in the project header to open it. Select **Chat** to return to the current
 conversation.
 
-## Start parallel work
+## Configure Autopilot
 
-Select **New worktree** to prepare an isolated thread from the project's default branch. Describe
-the task in Chat and send the message to create the worktree and start the agent. Repeat this for
-work that can safely run in parallel.
+Open **Autopilot settings** before starting a project workflow. The project policy controls:
 
-The board groups work by its real lifecycle:
+- how many agents may run at the same time;
+- whether each task gets a dedicated worktree;
+- whether FACT3 runs a separate verification pass;
+- whether verified work waits for human review;
+- how many attempts and runtime minutes a task may use; and
+- whether delivery stops at a local commit, pushes a branch, or opens a pull request.
 
-- **Running** contains agents that are starting, working, or waiting for your input or approval.
-- **Review** contains stopped work that is ready for you to inspect.
-- **Complete** contains work that you have explicitly marked complete.
+Use **Start** and **Pause** in the board status bar to control scheduling. Pausing prevents queued
+tasks from starting; it does not terminate agents that are already working.
 
-These states are not drag-and-drop labels. They follow the underlying agent and thread state so the
-board cannot imply that work is running or finished when it is not.
+## Create autonomous tasks
 
-## Review a task
+Select **New task**, then provide a clear goal and acceptance criteria. You can also select tasks
+that must be approved first. FACT3 records those dependencies instead of relying on card order or
+manual drag-and-drop.
 
-Select a card to open its detail panel. The panel shows the original goal, current plan or recent
-activity, changed files, and source-control status. From there you can open the diff, return to the
-full chat, or use the existing commit, push, and pull-request controls for that worktree.
+The board follows the real lifecycle:
 
-When the work is accepted, select **Mark complete**. You can reopen a completed task if more work is
-needed.
+- **Queue** contains planned work and work waiting for a dependency or capacity slot.
+- **Running** contains implementation and verification turns that are actively executing.
+- **Needs attention** contains a failed run or an agent waiting for a decision or permission.
+- **Review** contains verified work waiting for a human decision.
+- **Done** contains approved or cancelled work that remains available for inspection.
+
+Autopilot starts eligible queued tasks up to the configured concurrency limit. A dependent task
+does not start merely because its prerequisite agent stopped; it starts only after the prerequisite
+is approved.
+
+## Inspect and review work
+
+Select a card to open its detail panel. The panel shows the goal, acceptance criteria, attempt and
+verification state, recent activity, changed files, worktree, branch, and pull request when one is
+available. From there you can open the full diff or Chat for the task.
+
+Select **Approve** to accept verified work. Select **Request changes** to attach precise feedback
+and return the task to the queue for another autonomous attempt. Failed tasks can be retried while
+attempts remain, running tasks can be cancelled, and completed tasks can be reopened.
 
 ## History
 

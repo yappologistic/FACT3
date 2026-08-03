@@ -19,7 +19,7 @@ type CommandType = ClientOrchestrationCommand["type"];
 type CommandOf<T extends CommandType> = Extract<ClientOrchestrationCommand, { readonly type: T }>;
 type CommandInput<T extends CommandType> = Omit<
   CommandOf<T>,
-  "type" | "commandId" | "createdAt"
+  "type" | "commandId" | "createdAt" | "updatedAt"
 > & {
   readonly commandId?: CommandId;
 } & ("createdAt" extends keyof CommandOf<T>
@@ -30,6 +30,7 @@ type CommandInput<T extends CommandType> = Omit<
 
 export type CreateProjectInput = CommandInput<"project.create">;
 export type UpdateProjectInput = CommandInput<"project.meta.update">;
+export type ConfigureProjectAutomationInput = CommandInput<"project.automation.configure">;
 export type DeleteProjectInput = CommandInput<"project.delete">;
 export type CreateThreadInput = CommandInput<"thread.create">;
 export type DeleteThreadInput = CommandInput<"thread.delete">;
@@ -48,6 +49,8 @@ export type RespondToThreadApprovalInput = CommandInput<"thread.approval.respond
 export type RespondToThreadUserInputInput = CommandInput<"thread.user-input.respond">;
 export type RevertThreadCheckpointInput = CommandInput<"thread.checkpoint.revert">;
 export type StopThreadSessionInput = CommandInput<"thread.session.stop">;
+export type ConfigureThreadAutomationInput = CommandInput<"thread.automation.configure">;
+export type TransitionThreadAutomationInput = CommandInput<"thread.automation.transition">;
 
 type DispatchTag = typeof ORCHESTRATION_WS_METHODS.dispatchCommand;
 type CommandEffect = Effect.Effect<
@@ -104,6 +107,17 @@ export const updateProject: (input: UpdateProjectInput) => CommandEffect = Effec
     commandId: yield* commandId(input),
   });
 });
+
+export const configureProjectAutomation: (input: ConfigureProjectAutomationInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.configureProjectAutomation")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "project.automation.configure",
+      commandId: metadata.commandId,
+      updatedAt: metadata.createdAt,
+    });
+  });
 
 export const deleteProject: (input: DeleteProjectInput) => CommandEffect = Effect.fn(
   "EnvironmentCommands.deleteProject",
@@ -298,3 +312,25 @@ export const stopThreadSession: (input: StopThreadSessionInput) => CommandEffect
     createdAt: metadata.createdAt,
   });
 });
+
+export const configureThreadAutomation: (input: ConfigureThreadAutomationInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.configureThreadAutomation")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.automation.configure",
+      commandId: metadata.commandId,
+      updatedAt: metadata.createdAt,
+    });
+  });
+
+export const transitionThreadAutomation: (input: TransitionThreadAutomationInput) => CommandEffect =
+  Effect.fn("EnvironmentCommands.transitionThreadAutomation")(function* (input) {
+    const metadata = yield* timestampedCommandMetadata(input);
+    return yield* dispatch({
+      ...input,
+      type: "thread.automation.transition",
+      commandId: metadata.commandId,
+      updatedAt: metadata.createdAt,
+    });
+  });

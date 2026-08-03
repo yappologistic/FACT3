@@ -7,12 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { memo } from "react";
-import {
-  GitBranchPlusIcon,
-  HistoryIcon,
-  LayoutDashboardIcon,
-  MessageSquareIcon,
-} from "lucide-react";
+import { HistoryIcon, LayoutDashboardIcon, ListPlusIcon, MessageSquareIcon } from "lucide-react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
@@ -55,7 +50,7 @@ interface ChatHeaderProps {
   onWorkspaceViewChange: (view: WorkspaceView) => void;
   kanbanHistoryOpen: boolean;
   onKanbanHistoryOpenChange: (open: boolean) => void;
-  onNewWorktree: () => void;
+  onNewTask: () => void;
 }
 
 export function shouldShowOpenInPicker(input: {
@@ -93,7 +88,7 @@ export const ChatHeader = memo(function ChatHeader({
   onWorkspaceViewChange,
   kanbanHistoryOpen,
   onKanbanHistoryOpenChange,
-  onNewWorktree,
+  onNewTask,
 }: ChatHeaderProps) {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const fileScripts = useT3ProjectFileScripts(
@@ -209,10 +204,10 @@ export const ChatHeader = memo(function ChatHeader({
               variant="outline"
               size="xs"
               className="[-webkit-app-region:no-drag]"
-              onClick={onNewWorktree}
+              onClick={onNewTask}
             >
-              <GitBranchPlusIcon aria-hidden className="size-3.5" />
-              <span className="hidden @3xl/header-actions:inline">New worktree</span>
+              <ListPlusIcon aria-hidden className="size-3.5" />
+              <span className="hidden @3xl/header-actions:inline">New task</span>
             </Button>
             <Button
               type="button"
