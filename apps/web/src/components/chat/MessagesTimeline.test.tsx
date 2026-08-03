@@ -233,7 +233,7 @@ describe("MessagesTimeline", () => {
     expect(markup).not.toContain("<canvas");
   });
 
-  it("uses Interior Text Reveal only while an assistant response is streaming", () => {
+  it("renders streaming text directly without a per-word reveal animation", () => {
     const assistantMessageId = MessageId.make("message-streaming-reveal");
     const turnId = TurnId.make("turn-streaming-reveal");
     const message = {
@@ -273,8 +273,8 @@ describe("MessagesTimeline", () => {
       />,
     );
 
-    expect(streamingMarkup).toContain('data-interior-text-reveal="streaming"');
-    expect(streamingMarkup).toContain("blur(8px)");
+    expect(streamingMarkup).not.toContain("data-interior-text-reveal");
+    expect(streamingMarkup).not.toContain("blur(8px)");
     expect(streamingMarkup).toContain("<strong>");
     expect(completedMarkup).not.toContain("data-interior-text-reveal");
     expect(completedMarkup).toContain("<strong>");

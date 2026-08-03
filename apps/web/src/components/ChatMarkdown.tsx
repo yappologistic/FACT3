@@ -42,10 +42,6 @@ import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
 import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import {
-  InlineStreamingTextReveal,
-  StreamingMarkdownTextReveal,
-} from "./interior/StreamingMarkdownTextReveal";
-import {
   resolveExternalWebLinkHost,
   showExternalLinkContextMenu,
 } from "./chat/externalLinkContextMenu";
@@ -106,14 +102,6 @@ interface ChatMarkdownProps {
   className?: string;
   /** Treat single newlines as hard breaks — chat-style user input. */
   lineBreaks?: boolean;
-}
-
-function StreamingRevealBoundary({ active, children }: { active: boolean; children: ReactNode }) {
-  return active ? <StreamingMarkdownTextReveal>{children}</StreamingMarkdownTextReveal> : children;
-}
-
-function renderStreamingText(text: string) {
-  return <InlineStreamingTextReveal text={text} />;
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -1419,15 +1407,7 @@ function ChatMarkdown({
 
     return {
       p({ node: _node, children, ...props }) {
-        return (
-          <p {...props}>
-            {renderSkillInlineMarkdownChildren(
-              children,
-              skills,
-              isStreaming ? renderStreamingText : undefined,
-            )}
-          </p>
-        );
+        return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>;
       },
       li({ node, children, ...props }) {
         const listItemStart = node?.position?.start.offset;
@@ -1435,69 +1415,33 @@ function ChatMarkdown({
           typeof listItemStart === "number" ? findTaskListMarkerOffset(text, listItemStart) : null;
         return (
           <li {...props} data-task-marker-offset={markerOffset ?? undefined}>
-            {renderSkillInlineMarkdownChildren(
-              children,
-              skills,
-              isStreaming ? renderStreamingText : undefined,
-            )}
+            {renderSkillInlineMarkdownChildren(children, skills)}
           </li>
         );
       },
       h1({ node: _node, children, ...props }) {
-        return (
-          <h1 {...props}>
-            <StreamingRevealBoundary active={isStreaming}>{children}</StreamingRevealBoundary>
-          </h1>
-        );
+        return <h1 {...props}>{children}</h1>;
       },
       h2({ node: _node, children, ...props }) {
-        return (
-          <h2 {...props}>
-            <StreamingRevealBoundary active={isStreaming}>{children}</StreamingRevealBoundary>
-          </h2>
-        );
+        return <h2 {...props}>{children}</h2>;
       },
       h3({ node: _node, children, ...props }) {
-        return (
-          <h3 {...props}>
-            <StreamingRevealBoundary active={isStreaming}>{children}</StreamingRevealBoundary>
-          </h3>
-        );
+        return <h3 {...props}>{children}</h3>;
       },
       h4({ node: _node, children, ...props }) {
-        return (
-          <h4 {...props}>
-            <StreamingRevealBoundary active={isStreaming}>{children}</StreamingRevealBoundary>
-          </h4>
-        );
+        return <h4 {...props}>{children}</h4>;
       },
       h5({ node: _node, children, ...props }) {
-        return (
-          <h5 {...props}>
-            <StreamingRevealBoundary active={isStreaming}>{children}</StreamingRevealBoundary>
-          </h5>
-        );
+        return <h5 {...props}>{children}</h5>;
       },
       h6({ node: _node, children, ...props }) {
-        return (
-          <h6 {...props}>
-            <StreamingRevealBoundary active={isStreaming}>{children}</StreamingRevealBoundary>
-          </h6>
-        );
+        return <h6 {...props}>{children}</h6>;
       },
       td({ node: _node, children, ...props }) {
-        return (
-          <td {...props}>
-            <StreamingRevealBoundary active={isStreaming}>{children}</StreamingRevealBoundary>
-          </td>
-        );
+        return <td {...props}>{children}</td>;
       },
       th({ node: _node, children, ...props }) {
-        return (
-          <th {...props}>
-            <StreamingRevealBoundary active={isStreaming}>{children}</StreamingRevealBoundary>
-          </th>
-        );
+        return <th {...props}>{children}</th>;
       },
       input({ node: _node, type, checked, disabled: _disabled, ...props }) {
         if (type !== "checkbox" || !onTaskListChange) {

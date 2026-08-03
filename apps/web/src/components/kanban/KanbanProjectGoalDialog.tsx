@@ -1,4 +1,5 @@
-import type { ModelSelection } from "@t3tools/contracts";
+import type { ModelSelection, ServerProvider } from "@t3tools/contracts";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
 import { useState } from "react";
 
@@ -21,6 +22,10 @@ import { threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { DEFAULT_AUTOMATION_POLICY } from "./KanbanAutomationDialogs";
 import { OpenTuiSpinner } from "./OpenTuiSpinner";
+import {
+  KanbanModelSelectionControls,
+  resolveKanbanModelSelection,
+} from "./KanbanModelSelectionControls";
 
 function shortPlanTitle(goal: string): string {
   const compact = goal.replace(/\s+/g, " ").trim();
@@ -33,6 +38,8 @@ export function KanbanProjectGoalDialog(props: {
   readonly project: EnvironmentProject;
   readonly baseBranch: string;
   readonly modelSelection: ModelSelection | null;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: UnifiedSettings;
 }) {
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
@@ -41,16 +48,19 @@ export function KanbanProjectGoalDialog(props: {
   });
   const [goal, setGoal] = useState("");
   const [baseBranch, setBaseBranch] = useState(props.baseBranch);
+  const [modelSelection, setModelSelection] = useState<ModelSelection | null>(() =>
+    resolveKanbanModelSelection(props.providers, props.modelSelection),
+  );
   const [submitting, setSubmitting] = useState(false);
   const policy = props.project.automationPolicy ?? DEFAULT_AUTOMATION_POLICY;
   const canSubmit =
-    props.modelSelection !== null &&
+    modelSelection !== null &&
     goal.trim().length > 0 &&
     baseBranch.trim().length > 0 &&
     !submitting;
 
   const submit = async () => {
-    if (!canSubmit || props.modelSelection === null) return;
+    if (!canSubmit || modelSelection === null) return;
     setSubmitting(true);
     const threadId = newThreadId();
     const createdAt = new Date().toISOString();
@@ -60,7 +70,7 @@ export function KanbanProjectGoalDialog(props: {
         threadId,
         projectId: props.project.id,
         title: shortPlanTitle(goal),
-        modelSelection: props.modelSelection,
+        modelSelection,
         runtimeMode: "auto",
         interactionMode: "plan",
         branch: baseBranch.trim(),
@@ -123,6 +133,7 @@ export function KanbanProjectGoalDialog(props: {
     }
     setSubmitting(false);
     setGoal("");
+    setModelSelection(resolveKanbanModelSelection(props.providers, props.modelSelection));
     props.onOpenChange(false);
     toastManager.add({
       type: "success",
@@ -167,6 +178,12 @@ export function KanbanProjectGoalDialog(props: {
               onChange={(event) => setBaseBranch(event.target.value)}
             />
           </div>
+          <KanbanModelSelectionControls
+            providers={props.providers}
+            settings={props.settings}
+            value={modelSelection}
+            onChange={setModelSelection}
+          />
           <div className="rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.025] px-3.5 py-3 text-[11px] leading-4 text-muted-foreground">
             The proposal will assign task order, likely file ownership, the model and reasoning
             level, plus verification checks. Implementation begins only after you approve it.

@@ -14,6 +14,7 @@ import {
   latestCheckpointSummary,
   liveKanbanAutomation,
   parseAutomationPlan,
+  presentKanbanAutomationError,
 } from "./KanbanBoard.logic";
 
 const NOW = "2026-08-03T10:00:00.000Z";
@@ -358,5 +359,36 @@ describe("Kanban board summaries", () => {
       "Waiting for Autopilot to start this task.",
     );
     expect(describeEmptyKanbanActivity(undefined)).toBe("No activity has been recorded yet.");
+  });
+
+  it("turns Git setup failures into clear recovery guidance", () => {
+    expect(
+      presentKanbanAutomationError(
+        "GitCommandError: Git command failed in GitWorkflowService.createWorktree (D:/empty): Failed to resolve the VCS driver. { [cause]: No supported VCS repository was detected at D:/empty. at file:///server.mjs:1:1",
+      ),
+    ).toEqual({
+      title: "Git is not set up for this project",
+      detail: "Autopilot needs a Git repository so each task can work safely in isolation.",
+      recovery: "Initialize Git, create the first commit, then retry the task.",
+    });
+
+    expect(
+      presentKanbanAutomationError(
+        "GitCommandError: git worktree add failed because HEAD does not have any commits yet at file:///server.mjs:1:1",
+      ).title,
+    ).toBe("Create the first commit before starting");
+  });
+
+  it("never exposes a server stack trace in the board", () => {
+    const presentation = presentKanbanAutomationError(
+      "GitCommandError: Git command failed in GitVcsDriver.createWorktree (D:/repo): git worktree add failed at file:///D:/FACT3/apps/server/dist/bin.mjs:32537:66",
+    );
+    expect(presentation.title).toBe("FACT3 could not create the task worktree");
+    expect(presentation.detail).not.toContain("file:///");
+
+    const genericPresentation = presentKanbanAutomationError(
+      "Provider failed to start at AutomationReactor.dispatchRun (file:///D:/FACT3/apps/server/dist/bin.mjs:89129:11)",
+    );
+    expect(genericPresentation.detail).toBe("Provider failed to start");
   });
 });

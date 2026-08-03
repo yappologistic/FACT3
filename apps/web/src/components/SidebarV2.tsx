@@ -2,6 +2,7 @@ import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import { ThinkingOrb } from "thinking-orbs";
 import {
+  canSettle,
   canSnooze,
   effectiveSettled,
   effectiveSnoozed,
@@ -376,6 +377,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   // False on environments whose server predates thread.settle/unsettle:
   // the lifecycle affordances hide entirely rather than fail on click.
   settlementSupported: boolean;
+  settleAllowed: boolean;
   // Same contract for thread.snooze/unsnooze.
   snoozeSupported: boolean;
   // Compact wake countdown ("2h") for rows in the snoozed shelf.
@@ -865,7 +867,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 >
                   <Undo2Icon className="mb-px size-3.5" />
                 </button>
-              ) : (
+              ) : props.settleAllowed ? (
                 <button
                   type="button"
                   aria-label="Settle thread"
@@ -874,7 +876,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 >
                   <CheckIcon className="size-3" />
                 </button>
-              )}
+              ) : null}
             </span>
             {props.jumpLabel ? <JumpHintBadge label={props.jumpLabel} /> : null}
           </TooltipTrigger>
@@ -968,7 +970,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                     threadTimeLabel(thread)
                   )}
                 </span>
-                {props.settlementSupported || showSnoozeButton ? (
+                {(props.settlementSupported && props.settleAllowed) || showSnoozeButton ? (
                   <span
                     className={cn(
                       "absolute inset-y-0 right-0 flex items-stretch opacity-0 transition-opacity focus-within:static focus-within:opacity-100 group-hover/v2-row:static group-hover/v2-row:opacity-100",
@@ -982,7 +984,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                         onSnooze={handleSnoozePreset}
                       />
                     ) : null}
-                    {props.settlementSupported ? (
+                    {props.settlementSupported && props.settleAllowed ? (
                       <button
                         type="button"
                         aria-label="Settle thread"
@@ -1786,6 +1788,8 @@ export default function SidebarV2() {
     (threadRef: ScopedThreadRef, opts: { coSettlingKeys?: ReadonlySet<string> } = {}) => {
       void (async () => {
         const threadKey = scopedThreadKey(threadRef);
+        const thread = threadByKeyRef.current.get(threadKey);
+        if (!thread || !canSettle(thread, { now: new Date().toISOString() })) return;
         if (settlingThreadKeysRef.current.has(threadKey)) return;
         settlingThreadKeysRef.current.add(threadKey);
         try {
@@ -1936,6 +1940,11 @@ export default function SidebarV2() {
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true &&
           canSnooze(thread, { now: selectionNow.toISOString() }),
       );
+      const canSettleSelection = selectedThreads.every(
+        (thread) =>
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
+            true && canSettle(thread, { now: selectionNow.toISOString() }),
+      );
       const titleRegenerationThreads = selectedThreads.filter(
         (thread) =>
           serverConfigs.get(thread.environmentId)?.environment.capabilities
@@ -1952,7 +1961,7 @@ export default function SidebarV2() {
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
-            { id: "settle", label: `Settle (${count})` },
+            { id: "settle", label: `Settle (${count})`, disabled: !canSettleSelection },
             ...(canSnoozeSelection
               ? [
                   {
@@ -2136,7 +2145,11 @@ export default function SidebarV2() {
                 ? [
                     isSettled
                       ? { id: "unsettle", label: "Un-settle thread" }
-                      : { id: "settle", label: "Settle thread" },
+                      : {
+                          id: "settle",
+                          label: "Settle thread",
+                          disabled: !canSettle(thread, { now: new Date().toISOString() }),
+                        },
                   ]
                 : []),
               ...(supportsSnooze
@@ -2612,6 +2625,7 @@ export default function SidebarV2() {
                         serverConfigs.get(thread.environmentId)?.environment.capabilities
                           .threadSettlement === true
                       }
+                      settleAllowed={canSettle(thread, { now: snoozeNow })}
                       snoozeSupported={
                         serverConfigs.get(thread.environmentId)?.environment.capabilities
                           .threadSnooze === true

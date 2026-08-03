@@ -8,17 +8,18 @@ import type {
   OrchestrationAutomationStage,
   ServerProvider,
 } from "@t3tools/contracts";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import { useAtomValue } from "@effect/atom-react";
 import {
   AlertTriangleIcon,
   ArchiveRestoreIcon,
-  BotIcon,
   CheckCircle2Icon,
   ChevronRightIcon,
   CircleIcon,
   FileCode2Icon,
   GitBranchIcon,
   HistoryIcon,
+  ListTodoIcon,
   MessageSquareTextIcon,
   PanelsTopLeftIcon,
   PauseIcon,
@@ -81,6 +82,7 @@ import {
   incompleteAutomationDependencies,
   liveKanbanAutomation,
   parseAutomationPlan,
+  presentKanbanAutomationError,
   sortKanbanThreads,
   type AutomationPlanTask,
   type KanbanActiveLane,
@@ -223,7 +225,7 @@ const KanbanCard = memo(function KanbanCard(props: {
       aria-pressed={props.selected}
       onClick={() => props.onSelect(props.thread)}
       className={cn(
-        "group w-full rounded-[18px] border bg-card/62 p-3.5 text-left shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]",
+        "group isolate w-full overflow-hidden rounded-[20px] border bg-card/62 bg-clip-padding p-3.5 text-left shadow-[0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]",
         "transition-[border-color,background-color,transform,box-shadow] duration-150 ease-out motion-reduce:transform-none motion-reduce:transition-none",
         "hover:-translate-y-px hover:border-foreground/16 hover:bg-card/86 hover:shadow-sm",
         "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
@@ -245,7 +247,7 @@ const KanbanCard = memo(function KanbanCard(props: {
           {props.thread.automation?.taskKind === "planning" ? (
             <SparklesIcon aria-hidden className="size-3.5" />
           ) : (
-            <BotIcon aria-hidden className="size-3.5" />
+            <ListTodoIcon aria-hidden className="size-3.5" />
           )}
         </span>
         <span className="min-w-0 flex-1">
@@ -459,6 +461,10 @@ function KanbanInspector(props: {
   const [lifecyclePending, setLifecyclePending] = useState(false);
   const [requestChangesOpen, setRequestChangesOpen] = useState(false);
   const automation = liveKanbanAutomation(props.threadShell, thread);
+  const automationError = useMemo(
+    () => (automation?.lastError ? presentKanbanAutomationError(automation.lastError) : null),
+    [automation?.lastError],
+  );
   const policy = props.project.automationPolicy ?? DEFAULT_AUTOMATION_POLICY;
   const proposedExecution = useMemo(() => {
     if (automation?.taskKind !== "planning" || !thread) return null;
@@ -558,6 +564,20 @@ function KanbanInspector(props: {
             : [],
     [checkpointFiles, fullThreadDiff.data, fullThreadDiff.error, fullThreadFiles, workingFiles],
   );
+  const canOpenDiff = visibleFiles.length > 0;
+  const sourceControlSummary = automationError
+    ? automationError.title === "Git is not set up for this project"
+      ? "Git setup required"
+      : "Source-control status unavailable"
+    : gitStatus.error
+      ? "Source-control status unavailable"
+      : gitStatus.data?.pr?.state === "open"
+        ? `Pull request #${gitStatus.data.pr.number} is open`
+        : gitStatus.data?.hasWorkingTreeChanges
+          ? "Uncommitted changes"
+          : gitStatus.data?.aheadCount
+            ? `${gitStatus.data.aheadCount} commit${gitStatus.data.aheadCount === 1 ? "" : "s"} ahead`
+            : "Worktree is up to date";
 
   const showLifecycleError = () =>
     toastManager.add(
@@ -574,6 +594,7 @@ function KanbanInspector(props: {
       stage: OrchestrationAutomationStage,
       extra: Partial<{
         phase: "implementation" | "verification";
+        attempt: number;
         feedback: string | null;
         completedAt: string | null;
         lastError: string | null;
@@ -808,7 +829,8 @@ function KanbanInspector(props: {
               ? {
                   label: "Retry",
                   Icon: RotateCcwIcon,
-                  run: () => transition("ready", { lastError: null, completedAt: null }),
+                  run: () =>
+                    transition("ready", { attempt: 0, lastError: null, completedAt: null }),
                 }
               : automation.stage === "complete" || automation.stage === "cancelled"
                 ? {
@@ -817,6 +839,7 @@ function KanbanInspector(props: {
                     run: () =>
                       transition("ready", {
                         phase: "implementation",
+                        attempt: 0,
                         feedback: null,
                         completedAt: null,
                         lastError: null,
@@ -1041,10 +1064,23 @@ function KanbanInspector(props: {
                     ) : null}
                   </div>
                 ) : null}
-                {automation.lastError ? (
-                  <p className="mt-3 rounded-[12px] border border-destructive/15 bg-destructive/[0.035] px-3 py-2 text-[11px] leading-4 text-destructive-foreground/82">
-                    {automation.lastError}
-                  </p>
+                {automationError ? (
+                  <div
+                    role="alert"
+                    className="mt-3 rounded-[14px] border border-destructive/15 bg-destructive/[0.035] px-3 py-2.5"
+                  >
+                    <p className="text-[11px] font-medium leading-4 text-destructive-foreground/88">
+                      {automationError.title}
+                    </p>
+                    <p className="mt-1 text-[10px] leading-4 text-destructive-foreground/72">
+                      {automationError.detail}
+                    </p>
+                    {automationError.recovery ? (
+                      <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground/78">
+                        {automationError.recovery}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : automation.verification.summary ? (
                   <p className="mt-3 text-[11px] leading-4 text-muted-foreground/72">
                     {automation.verification.summary}
@@ -1112,19 +1148,49 @@ function KanbanInspector(props: {
                 aria-labelledby="kanban-changes-heading"
                 className="border-t border-foreground/[0.07] pt-4"
               >
-                <div className="flex items-center justify-between gap-3">
-                  <h3
-                    id="kanban-changes-heading"
-                    className="text-[11px] font-medium text-foreground/82"
+                {canOpenDiff ? (
+                  <button
+                    type="button"
+                    aria-label="Open this task's complete diff"
+                    className="group/changes flex w-full items-center justify-between gap-3 rounded-[10px] text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() =>
+                      props.onOpenDiff(
+                        props.threadShell,
+                        gitStatus.data?.hasWorkingTreeChanges ? "unstaged" : "branch",
+                      )
+                    }
                   >
-                    Changes
-                  </h3>
-                  {!fullThreadDiff.isPending || workingFiles.length > 0 ? (
-                    <span className="text-[10px] tabular-nums text-muted-foreground">
-                      {visibleFiles.length} {visibleFiles.length === 1 ? "file" : "files"}
+                    <span
+                      id="kanban-changes-heading"
+                      className="text-[11px] font-medium text-foreground/82 group-hover/changes:text-foreground"
+                    >
+                      Changes
                     </span>
-                  ) : null}
-                </div>
+                    <span className="flex items-center gap-1.5">
+                      <span className="text-[10px] tabular-nums text-muted-foreground">
+                        {visibleFiles.length} {visibleFiles.length === 1 ? "file" : "files"}
+                      </span>
+                      <ChevronRightIcon
+                        aria-hidden
+                        className="size-3.5 text-muted-foreground/45 transition-transform group-hover/changes:translate-x-0.5 group-hover/changes:text-muted-foreground motion-reduce:transition-none"
+                      />
+                    </span>
+                  </button>
+                ) : (
+                  <div className="flex items-center justify-between gap-3">
+                    <span
+                      id="kanban-changes-heading"
+                      className="text-[11px] font-medium text-foreground/82"
+                    >
+                      Changes
+                    </span>
+                    {!fullThreadDiff.isPending || workingFiles.length > 0 ? (
+                      <span className="text-[10px] tabular-nums text-muted-foreground">
+                        0 files
+                      </span>
+                    ) : null}
+                  </div>
+                )}
                 <div className="mt-2.5 space-y-2">
                   {fullThreadDiff.isPending && workingFiles.length === 0 ? (
                     <p className="text-[11px] text-muted-foreground/65">
@@ -1175,13 +1241,7 @@ function KanbanInspector(props: {
                       Source control
                     </h3>
                     <p className="mt-1 text-[10px] text-muted-foreground/65">
-                      {gitStatus.data?.pr?.state === "open"
-                        ? `Pull request #${gitStatus.data.pr.number} is open`
-                        : gitStatus.data?.hasWorkingTreeChanges
-                          ? "Uncommitted changes"
-                          : gitStatus.data?.aheadCount
-                            ? `${gitStatus.data.aheadCount} commit${gitStatus.data.aheadCount === 1 ? "" : "s"} ahead`
-                            : "Worktree is up to date"}
+                      {sourceControlSummary}
                     </p>
                   </div>
                   {automation?.stage === "review" ? (
@@ -1203,7 +1263,7 @@ function KanbanInspector(props: {
         </ScrollArea>
 
         <div className="grid grid-cols-2 gap-2 border-t border-foreground/[0.07] p-4">
-          {automation?.taskKind !== "planning" ? (
+          {automation?.taskKind !== "planning" && canOpenDiff ? (
             <Button
               variant="outline"
               size="sm"
@@ -1219,7 +1279,7 @@ function KanbanInspector(props: {
             </Button>
           ) : null}
           <Button
-            className={cn(automation?.taskKind === "planning" && "col-span-2")}
+            className={cn((automation?.taskKind === "planning" || !canOpenDiff) && "col-span-2")}
             variant="outline"
             size="sm"
             onClick={() => props.onOpenThread(props.threadShell)}
@@ -1438,25 +1498,17 @@ function AutomationControlBar(props: {
     <div className="flex items-center justify-between gap-3 border-b border-foreground/[0.06] px-4 py-2.5 sm:px-5">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <span
-            className={cn(
-              "size-1.5 rounded-full",
-              policy.enabled ? "bg-success" : "bg-muted-foreground/35",
-            )}
-          />
           <span className="text-xs font-medium text-foreground/84">
-            Autopilot {policy.enabled ? "on" : "off"}
+            Autopilot{" "}
+            <span className={policy.enabled ? "text-success" : "text-destructive"}>
+              {policy.enabled ? "on" : "off"}
+            </span>
           </span>
           <span className="text-[10px] tabular-nums text-muted-foreground/62">
             {activeCount}/{policy.createWorktrees ? policy.maxConcurrentRuns : 1} running
             {queuedCount > 0 ? ` · ${queuedCount} queued` : ""}
           </span>
         </div>
-        <p className="mt-0.5 truncate text-[10px] text-muted-foreground/58">
-          {policy.enabled
-            ? "Dependencies and capacity decide what starts next."
-            : "Queued work is held until you turn Autopilot on."}
-        </p>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
         <Button variant="outline" size="xs" onClick={props.onOpenGoal}>
@@ -1493,6 +1545,8 @@ export function KanbanBoard(props: {
   readonly onNewTaskOpenChange: (open: boolean) => void;
   readonly baseBranch: string;
   readonly modelSelection: ModelSelection | null;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: UnifiedSettings;
   readonly onOpenThread: (thread: EnvironmentThreadShell) => void;
   readonly onOpenDiff: (thread: EnvironmentThreadShell, scope: "branch" | "unstaged") => void;
 }) {
@@ -1526,6 +1580,7 @@ export function KanbanBoard(props: {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [goalOpen, setGoalOpen] = useState(false);
+  const boardIsEmpty = visibleLanes.every((lane) => lane.threads.length === 0);
   const selectedThread = selectedKey
     ? (visibleThreads.find((thread) => kanbanThreadKey(thread) === selectedKey) ?? null)
     : null;
@@ -1561,6 +1616,30 @@ export function KanbanBoard(props: {
             onSelect={selectThread}
             onRefresh={props.onRefreshArchivedThreads}
           />
+        ) : boardIsEmpty ? (
+          <div className="flex min-h-0 flex-1 items-start justify-center overflow-y-auto p-5 pt-[clamp(3rem,10vh,7rem)]">
+            <div className="w-full max-w-md rounded-[24px] border border-foreground/[0.065] bg-foreground/[0.018] px-7 py-8 text-center">
+              <span className="mx-auto flex size-10 items-center justify-center rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.035] text-muted-foreground">
+                <ListTodoIcon aria-hidden className="size-4.5" />
+              </span>
+              <h2 className="mt-4 text-sm font-medium text-foreground/88">
+                No autonomous work yet
+              </h2>
+              <p className="mx-auto mt-2 max-w-sm text-[11px] leading-5 text-muted-foreground/70">
+                Plan a project goal for FACT3 to break down, or add one focused task yourself.
+              </p>
+              <div className="mt-5 flex items-center justify-center gap-2">
+                <Button size="sm" onClick={() => setGoalOpen(true)}>
+                  <SparklesIcon aria-hidden className="size-3.5" />
+                  Plan project
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => props.onNewTaskOpenChange(true)}>
+                  <ListTodoIcon aria-hidden className="size-3.5" />
+                  New task
+                </Button>
+              </div>
+            </div>
+          </div>
         ) : (
           <div className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-x-auto p-4 sm:p-5">
             {visibleLanes.map((lane) => (
@@ -1601,6 +1680,8 @@ export function KanbanBoard(props: {
         threads={props.threads}
         baseBranch={props.baseBranch}
         modelSelection={props.modelSelection}
+        providers={props.providers}
+        settings={props.settings}
       />
       <KanbanProjectGoalDialog
         key={`goal:${props.project.environmentId}:${props.project.id}:${props.baseBranch}`}
@@ -1609,6 +1690,8 @@ export function KanbanBoard(props: {
         project={props.project}
         baseBranch={props.baseBranch}
         modelSelection={props.modelSelection}
+        providers={props.providers}
+        settings={props.settings}
       />
       <KanbanAutomationSettingsDialog
         key={`${props.project.environmentId}:${props.project.id}:${JSON.stringify(props.project.automationPolicy ?? DEFAULT_AUTOMATION_POLICY)}`}

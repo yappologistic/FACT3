@@ -5802,11 +5802,13 @@ function ChatViewContent(props: ChatViewProps) {
 
   return (
     <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
-      {rightPanelOpen && !shouldUsePlanSidebarSheet ? panelLayoutControls : null}
+      {workspaceView === "chat" && rightPanelOpen && !shouldUsePlanSidebarSheet
+        ? panelLayoutControls
+        : null}
       <div
         className={cn(
           "flex min-h-0 min-w-0 flex-col overflow-x-hidden",
-          rightPanelMaximized ? "w-0 flex-none" : "flex-1",
+          workspaceView === "chat" && rightPanelMaximized ? "w-0 flex-none" : "flex-1",
         )}
         data-chat-column-maximized-away={rightPanelMaximized ? "true" : "false"}
       >
@@ -5826,7 +5828,7 @@ function ChatViewContent(props: ChatViewProps) {
             COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
-          {!rightPanelOpen ? panelLayoutControls : null}
+          {workspaceView === "chat" && !rightPanelOpen ? panelLayoutControls : null}
           <ChatHeader
             activeThreadEnvironmentId={activeThread.environmentId}
             activeThreadId={activeThread.id}
@@ -5879,6 +5881,8 @@ function ChatViewContent(props: ChatViewProps) {
               onNewTaskOpenChange={setKanbanNewTaskOpen}
               baseBranch={activeThread.branch ?? "main"}
               modelSelection={activeProject.defaultModelSelection ?? activeThread.modelSelection}
+              providers={providerStatuses}
+              settings={settings}
               onOpenThread={handleOpenKanbanThread}
               onOpenDiff={handleOpenKanbanDiff}
             />
@@ -6250,7 +6254,10 @@ function ChatViewContent(props: ChatViewProps) {
         ))}
       </div>
 
-      {!shouldUsePlanSidebarSheet && rightPanelOpen && activeThreadRef ? (
+      {workspaceView === "chat" &&
+      !shouldUsePlanSidebarSheet &&
+      rightPanelOpen &&
+      activeThreadRef ? (
         <RightPanelTabs
           mode="inline"
           maximized={rightPanelMaximized}
@@ -6276,7 +6283,10 @@ function ChatViewContent(props: ChatViewProps) {
           {rightPanelContent}
         </RightPanelTabs>
       ) : null}
-      {shouldUsePlanSidebarSheet && rightPanelOpen && activeThreadRef ? (
+      {workspaceView === "chat" &&
+      shouldUsePlanSidebarSheet &&
+      rightPanelOpen &&
+      activeThreadRef ? (
         <RightPanelSheet open onClose={planSidebarOpen ? closePlanSidebar : closePreviewPanel}>
           <RightPanelTabs
             mode="sheet"

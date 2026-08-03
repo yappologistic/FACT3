@@ -37,9 +37,15 @@ implementation.
 ## Create autonomous tasks
 
 Select **New task**, then provide a clear goal and acceptance criteria. You can also select tasks
-that must be approved first. FACT3 records those dependencies instead of relying on card order or
-manual drag-and-drop. Add likely paths when you know them. Autopilot will not start two tasks with
-overlapping path ownership at the same time, even when concurrency is available.
+that must be approved first. Choose the provider, model, reasoning level, and speed for that task;
+these choices do not change the project or chat defaults. FACT3 records dependencies instead of
+relying on card order or manual drag-and-drop. Add likely paths when you know them. Autopilot will
+not start two tasks with overlapping path ownership at the same time, even when concurrency is
+available.
+
+Autonomous tasks require a Git repository with at least one commit. When dedicated worktrees are
+enabled, the selected base branch must also exist. If setup is incomplete, the task moves to
+**Needs attention** with a short explanation and a recovery step instead of a raw command error.
 
 The board follows the real lifecycle:
 
@@ -59,6 +65,8 @@ and moved to **Needs attention** with the reason preserved for review or retry.
 Select a card to open its detail panel. The panel shows the goal, acceptance criteria, attempt and
 verification state, recent activity, changed files, worktree, branch, and pull request when one is
 available. From there you can open the full diff or Chat for the task.
+
+Select the **Changes** heading or **Open diff** to inspect the complete task diff directly.
 
 The review footer presents one primary action at a time. Delivery must be complete before
 **Approve task** appears; otherwise the source-control action is shown instead. Select **Request

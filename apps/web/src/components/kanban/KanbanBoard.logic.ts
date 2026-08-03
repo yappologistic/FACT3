@@ -268,6 +268,69 @@ export function describeEmptyKanbanActivity(
   }
 }
 
+export type KanbanAutomationErrorPresentation = {
+  readonly title: string;
+  readonly detail: string;
+  readonly recovery: string | null;
+};
+
+function compactAutomationError(error: string): string {
+  const withoutStack = error
+    .split(/\s+at\s+(?:file:|[A-Za-z]:[\\/]|[A-Za-z_$][\w$./<>-]*\s*\()/u, 1)[0]
+    ?.split("{ [cause]:", 1)[0]
+    ?.replace(/^GitCommandError:\s*/u, "")
+    .replace(/^Git command failed in [^(]+\([^)]*\):\s*/u, "")
+    .trim();
+  if (!withoutStack) return "The autonomous run stopped unexpectedly.";
+  return withoutStack.length > 220 ? `${withoutStack.slice(0, 217)}…` : withoutStack;
+}
+
+export function presentKanbanAutomationError(error: string): KanbanAutomationErrorPresentation {
+  const normalized = error.toLowerCase();
+  if (
+    normalized.includes("no supported vcs repository was detected") ||
+    normalized.includes("not a git repository")
+  ) {
+    return {
+      title: "Git is not set up for this project",
+      detail: "Autopilot needs a Git repository so each task can work safely in isolation.",
+      recovery: "Initialize Git, create the first commit, then retry the task.",
+    };
+  }
+  if (
+    normalized.includes("does not have any commits") ||
+    normalized.includes("needed a single revision") ||
+    normalized.includes("bad revision 'head'") ||
+    normalized.includes("unknown revision or path not in the working tree")
+  ) {
+    return {
+      title: "Create the first commit before starting",
+      detail: "Git cannot create an isolated task worktree from a repository with no commit yet.",
+      recovery: "Commit the project once, confirm the base branch, then retry the task.",
+    };
+  }
+  if (normalized.includes("git worktree add failed") || normalized.includes("createworktree")) {
+    return {
+      title: "FACT3 could not create the task worktree",
+      detail: "The selected base branch may be missing, already checked out, or unavailable.",
+      recovery:
+        "Confirm the base branch exists and the repository has an initial commit, then retry.",
+    };
+  }
+  if (normalized.includes("no agent activity was recorded")) {
+    return {
+      title: "The agent stopped responding",
+      detail: compactAutomationError(error),
+      recovery: "Review the task and retry when the provider is available.",
+    };
+  }
+  return {
+    title: "The autonomous run stopped",
+    detail: compactAutomationError(error),
+    recovery: "Review the task details, then retry or open the chat for more context.",
+  };
+}
+
 export function incompleteAutomationDependencies(
   thread: EnvironmentThreadShell,
   threads: ReadonlyArray<EnvironmentThreadShell>,

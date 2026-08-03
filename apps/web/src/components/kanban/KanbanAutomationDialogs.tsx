@@ -1,8 +1,10 @@
 import type {
   ModelSelection,
   OrchestrationProjectAutomationPolicy,
+  ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
+import type { UnifiedSettings } from "@t3tools/contracts/settings";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -37,6 +39,10 @@ import { Switch } from "~/components/ui/switch";
 import { Textarea } from "~/components/ui/textarea";
 import { toastManager } from "~/components/ui/toast";
 import { OpenTuiSpinner } from "./OpenTuiSpinner";
+import {
+  KanbanModelSelectionControls,
+  resolveKanbanModelSelection,
+} from "./KanbanModelSelectionControls";
 
 export const DEFAULT_AUTOMATION_POLICY: OrchestrationProjectAutomationPolicy = {
   enabled: false,
@@ -69,6 +75,8 @@ export function KanbanNewTaskDialog(props: {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
   readonly baseBranch: string;
   readonly modelSelection: ModelSelection | null;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings: UnifiedSettings;
 }) {
   const createThread = useAtomCommand(threadEnvironment.create, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
@@ -80,6 +88,9 @@ export function KanbanNewTaskDialog(props: {
   const [criteria, setCriteria] = useState("");
   const [changeScopes, setChangeScopes] = useState("");
   const [baseBranch, setBaseBranch] = useState(props.baseBranch);
+  const [modelSelection, setModelSelection] = useState<ModelSelection | null>(() =>
+    resolveKanbanModelSelection(props.providers, props.modelSelection),
+  );
   const [dependencies, setDependencies] = useState<ReadonlySet<ThreadId>>(new Set());
   const [maxAttempts, setMaxAttempts] = useState(
     props.project.automationPolicy?.defaultMaxAttempts ??
@@ -98,7 +109,7 @@ export function KanbanNewTaskDialog(props: {
     [props.threads],
   );
   const canSubmit =
-    props.modelSelection !== null &&
+    modelSelection !== null &&
     title.trim().length > 0 &&
     goal.trim().length > 0 &&
     baseBranch.trim().length > 0 &&
@@ -110,6 +121,7 @@ export function KanbanNewTaskDialog(props: {
     setCriteria("");
     setChangeScopes("");
     setBaseBranch(props.baseBranch);
+    setModelSelection(resolveKanbanModelSelection(props.providers, props.modelSelection));
     setDependencies(new Set());
     setMaxAttempts(
       props.project.automationPolicy?.defaultMaxAttempts ??
@@ -122,7 +134,7 @@ export function KanbanNewTaskDialog(props: {
   };
 
   const submit = async () => {
-    if (!canSubmit || props.modelSelection === null) return;
+    if (!canSubmit || modelSelection === null) return;
     setSubmitting(true);
     const threadId = newThreadId();
     const createdAt = new Date().toISOString();
@@ -132,7 +144,7 @@ export function KanbanNewTaskDialog(props: {
         threadId,
         projectId: props.project.id,
         title: title.trim(),
-        modelSelection: props.modelSelection,
+        modelSelection,
         runtimeMode: "full-access",
         interactionMode: "default",
         branch: baseBranch.trim(),
@@ -254,6 +266,13 @@ export function KanbanNewTaskDialog(props: {
             />
           </div>
 
+          <KanbanModelSelectionControls
+            providers={props.providers}
+            settings={props.settings}
+            value={modelSelection}
+            onChange={setModelSelection}
+          />
+
           {dependencyOptions.length > 0 ? (
             <fieldset>
               <legend className="mb-1.5 text-xs font-medium text-foreground/82">Wait for</legend>
@@ -346,9 +365,8 @@ export function KanbanNewTaskDialog(props: {
           </details>
 
           <p className="text-[11px] leading-4 text-muted-foreground/72">
-            Uses {props.modelSelection?.model ?? "the project default model"} with full access.
-            Routine work proceeds automatically; provider approval and user-input requests still
-            stop in Needs attention.
+            Runs with full access. Provider approval and user-input requests still stop in Needs
+            attention.
           </p>
         </DialogPanel>
         <DialogFooter>
