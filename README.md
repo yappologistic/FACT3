@@ -4,7 +4,9 @@
 
 # FACT3 Code
 
-FACT3 Code is an "agent harness control surface". It enables control of the agents on your machine with a best-in-class mobile app ([iOS](https://apps.apple.com/us/app/t3-code-remote-claude-more/id6787819824), [Android](https://play.google.com/store/apps/details?id=com.t3tools.t3code)), [web app](https://app.t3.codes) and [Electron-based desktop app](https://t3.codes).
+FACT3 Code is a desktop-focused "agent harness control surface" built as a UI-focused fork of T3 Code. The primary FACT3 experience is the Electron app.
+
+Because it retains T3 Code's underlying server and protocol architecture, FACT3 Code remains compatible with the existing T3 web and mobile clients. Those clients are maintained and distributed by T3 Code; this repository does not publish separate FACT3 iOS or Android apps.
 
 Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, and OpenCode. If they're set up on your computer, FACT3 Code can control them.
 
@@ -31,39 +33,18 @@ We wanted something performant, remote-ready, and truly open. If we ever go the 
 > - Grok Build: install [Grok Build CLI](https://x.ai/cli) and run `grok login`
 > - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
 
-### Try it out (install-free)
+### Run the Electron app from source
 
-The easiest way to test FACT3 Code is to run the server in your terminal (requires Node.js 22.16+, 23.11+, or 24.10+):
-
-```bash
-npx t3@latest
-```
-
-This will launch FACT3 Code's backend on your machine as well as the local web app to control your agents.
-
-Tip: Use `npx t3@latest --help` for the full CLI reference.
-
-### Desktop app
-
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/yappologistic/FACT3/releases), or from your favorite package registry:
-
-#### Windows (`winget`)
+FACT3 Code does not currently publish prebuilt desktop releases. To run the Electron app, install [Node.js 24.13.1 or newer](https://nodejs.org/) and [Vite+](https://viteplus.dev/guide/), then run:
 
 ```bash
-winget install T3Tools.T3Code
+git clone https://github.com/yappologistic/FACT3.git
+cd FACT3
+vp i
+vp run dev:desktop
 ```
 
-#### macOS (Homebrew)
-
-```bash
-brew install --cask t3-code
-```
-
-#### Arch Linux (AUR)
-
-```bash
-yay -S t3code-bin
-```
+The development runner builds the desktop entry, starts the renderer, and opens the Electron app with hot reload.
 
 ## Some notes
 
