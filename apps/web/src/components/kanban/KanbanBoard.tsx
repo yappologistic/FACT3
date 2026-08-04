@@ -1168,39 +1168,37 @@ function KanbanInspector(props: {
 
   return (
     <>
-      <aside className="absolute inset-y-0 right-0 z-30 flex min-h-0 w-[min(23rem,calc(100%-1rem))] shrink-0 animate-in flex-col border-l border-foreground/[0.07] bg-background/96 shadow-[-16px_0_40px_rgba(0,0,0,0.16)] backdrop-blur-xl duration-200 slide-in-from-right-2 motion-reduce:animate-none min-[1600px]:static min-[1600px]:w-[23rem] min-[1600px]:bg-background/72 min-[1600px]:shadow-none">
+      <aside className="absolute inset-y-0 right-0 z-30 flex min-h-0 w-[min(27rem,calc(100%-1rem))] shrink-0 animate-in flex-col border-l border-foreground/[0.07] bg-background/96 shadow-[-16px_0_40px_rgba(0,0,0,0.16)] backdrop-blur-xl duration-200 slide-in-from-right-2 motion-reduce:animate-none min-[1600px]:static min-[1600px]:w-[27rem] min-[1600px]:bg-background/72 min-[1600px]:shadow-none">
         <ScrollArea className="min-h-0 flex-1">
-          <div className="space-y-5 p-5">
+          <div className="space-y-5 p-6">
             <header>
               <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium leading-5 text-foreground/92">
-                    {props.threadShell.title}
-                  </p>
-                  <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
-                    <GitBranchIcon aria-hidden className="size-3 shrink-0" />
-                    <span className="truncate">{props.threadShell.branch ?? "No branch"}</span>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {workflowRoleLabel(props.threadShell) ? (
-                    <span className="rounded-full border border-foreground/[0.07] bg-foreground/[0.035] px-2 py-1 text-[11px] text-foreground/72">
-                      {workflowRoleLabel(props.threadShell)}
-                    </span>
-                  ) : null}
-                  <span className="rounded-full border border-foreground/[0.07] bg-foreground/[0.035] px-2 py-1 text-[11px] text-muted-foreground">
-                    {compactModelLabel(props.threadShell.modelSelection.model)}
+                <p className="min-w-0 flex-1 text-sm font-medium leading-5 text-foreground/92">
+                  {props.threadShell.title}
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label="Close task details"
+                  onClick={props.onClose}
+                >
+                  <XIcon aria-hidden className="size-3.5" />
+                </Button>
+              </div>
+              <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 text-[11px] text-muted-foreground/72">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <GitBranchIcon aria-hidden className="size-3 shrink-0" />
+                  <span className="max-w-40 truncate">
+                    {props.threadShell.branch ?? "No branch"}
                   </span>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label="Close task details"
-                    onClick={props.onClose}
-                  >
-                    <XIcon aria-hidden className="size-3.5" />
-                  </Button>
-                </div>
+                </span>
+                <span className="rounded-full border border-foreground/[0.07] bg-foreground/[0.03] px-2 py-0.5">
+                  {workflowRoleLabel(props.threadShell)
+                    ? `${workflowRoleLabel(props.threadShell)} · `
+                    : ""}
+                  {compactModelLabel(props.threadShell.modelSelection.model)}
+                </span>
               </div>
             </header>
 
@@ -1211,7 +1209,7 @@ function KanbanInspector(props: {
               <h3 id="kanban-goal-heading" className="text-[12px] font-medium text-foreground/82">
                 Goal
               </h3>
-              <p className="mt-2 text-[12px] leading-5 text-muted-foreground">
+              <p className="mt-2 text-[12px] leading-5 text-muted-foreground/82">
                 {goal ?? "Open the task to add a clear implementation goal."}
               </p>
               {automation && automation.acceptanceCriteria.length > 0 ? (
@@ -1219,7 +1217,7 @@ function KanbanInspector(props: {
                   {automation.acceptanceCriteria.map((criterion) => (
                     <li
                       key={criterion}
-                      className="flex gap-2 text-[12px] leading-4 text-muted-foreground/82"
+                      className="flex gap-2 text-[12px] leading-4 text-muted-foreground/76"
                     >
                       <CircleIcon aria-hidden className="mt-1 size-2 shrink-0" />
                       <span>{criterion}</span>
@@ -1249,33 +1247,29 @@ function KanbanInspector(props: {
                 </div>
                 {proposedExecution ? (
                   <>
-                    <p className="mt-2 text-[12px] leading-4 text-muted-foreground/72">
+                    <p className="mt-2 text-[11px] leading-4 text-muted-foreground/68">
+                      <span className="font-medium text-foreground/72">Plan summary:</span>{" "}
                       {proposedExecution.summary}
                     </p>
-                    <ol className="mt-3 space-y-2">
+                    <ol className="mt-3 divide-y divide-foreground/[0.06] border-y border-foreground/[0.06]">
                       {proposedExecution.tasks.map((task, index) => {
                         const selection = proposedModelSelections[index];
                         const modelAvailable = selection !== null;
                         return (
-                          <li
-                            key={task.key}
-                            className="rounded-[14px] border border-foreground/[0.065] bg-foreground/[0.02] px-3 py-2.5"
-                          >
+                          <li key={task.key} className="py-3">
                             <div className="flex items-start gap-2.5">
-                              <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground/[0.055] text-[11px] tabular-nums text-muted-foreground">
-                                {index + 1}
+                              <span className="w-5 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-muted-foreground/48">
+                                {String(index + 1).padStart(2, "0")}
                               </span>
                               <div className="min-w-0 flex-1">
                                 <p className="text-[12px] font-medium leading-4 text-foreground/84">
                                   {task.title}
                                 </p>
-                                <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground/68">
+                                <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground/68">
                                   <span
                                     className={cn(
-                                      "rounded-full border px-1.5 py-0.5",
-                                      modelAvailable
-                                        ? "border-foreground/[0.07] bg-foreground/[0.03]"
-                                        : "border-destructive/20 bg-destructive/[0.04] text-destructive",
+                                      "font-medium",
+                                      modelAvailable ? "text-foreground/68" : "text-destructive",
                                     )}
                                   >
                                     {AUTOMATION_ROLE_LABELS[task.role]} ·{" "}
@@ -1289,7 +1283,7 @@ function KanbanInspector(props: {
                                     <span>can start immediately</span>
                                   )}
                                 </div>
-                                <p className="mt-1.5 truncate font-mono text-[10px] text-muted-foreground/55">
+                                <p className="mt-1.5 break-words font-mono text-[11px] leading-4 text-muted-foreground/62">
                                   {task.changeScopes.join(" · ")}
                                 </p>
                               </div>
@@ -1298,22 +1292,22 @@ function KanbanInspector(props: {
                         );
                       })}
                       {workflowConfig ? (
-                        <li className="rounded-[14px] border border-foreground/[0.065] bg-foreground/[0.02] px-3 py-2.5">
+                        <li className="py-3">
                           <div className="flex items-start gap-2.5">
-                            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground/[0.055] text-[11px] tabular-nums text-muted-foreground">
-                              {proposedExecution.tasks.length + 1}
+                            <span className="w-5 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-muted-foreground/48">
+                              {String(proposedExecution.tasks.length + 1).padStart(2, "0")}
                             </span>
                             <div className="min-w-0 flex-1">
                               <p className="text-[12px] font-medium leading-4 text-foreground/84">
                                 Integrate autonomous workflow
                               </p>
-                              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground/68">
+                              <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground/68">
                                 <span
                                   className={cn(
-                                    "rounded-full border px-1.5 py-0.5",
+                                    "font-medium",
                                     proposedIntegratorModelSelection
-                                      ? "border-foreground/[0.07] bg-foreground/[0.03]"
-                                      : "border-destructive/20 bg-destructive/[0.04] text-destructive",
+                                      ? "text-foreground/68"
+                                      : "text-destructive",
                                   )}
                                 >
                                   Integrator ·{" "}
@@ -1324,7 +1318,7 @@ function KanbanInspector(props: {
                                 </span>
                                 <span>after every planned task</span>
                               </div>
-                              <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground/55">
+                              <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/62">
                                 Resolves conflicts and verifies the combined result on the base
                                 branch.
                               </p>
@@ -1361,7 +1355,13 @@ function KanbanInspector(props: {
                 </h3>
                 <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
                   <dt className="text-muted-foreground/60">State</dt>
-                  <dd className="text-foreground/82">
+                  <dd
+                    className={cn(
+                      "text-foreground/82",
+                      automation.stage === "complete" && "text-success",
+                      automation.stage === "failed" && "text-destructive",
+                    )}
+                  >
                     {stateLabelForThread(props.threadShell, props.allThreads)}
                   </dd>
                   {automation.workflowId ? (
@@ -1377,7 +1377,13 @@ function KanbanInspector(props: {
                     {automation.attempt} of {automation.maxAttempts}
                   </dd>
                   <dt className="text-muted-foreground/60">Verification</dt>
-                  <dd className="capitalize text-foreground/82">
+                  <dd
+                    className={cn(
+                      "capitalize text-foreground/82",
+                      automation.verification.status === "passed" && "text-success",
+                      automation.verification.status === "failed" && "text-destructive",
+                    )}
+                  >
                     {automation.verification.status}
                   </dd>
                 </dl>
@@ -1440,24 +1446,29 @@ function KanbanInspector(props: {
                       </p>
                     ) : null}
                   </div>
-                ) : automation.verification.summary ? (
-                  <p className="mt-3 text-[12px] leading-4 text-muted-foreground/72">
-                    {automation.verification.summary}
-                  </p>
-                ) : null}
-                {!automationError && automation.verification.evidence.length > 0 ? (
-                  <div className="mt-3 rounded-[14px] border border-foreground/[0.065] bg-foreground/[0.018] px-3 py-2.5">
-                    <p className="text-[11px] font-medium text-foreground/76">
-                      Verification evidence
-                    </p>
-                    <ul className="mt-2 space-y-2">
+                ) : automation.verification.evidence.length > 0 ? (
+                  <div className="mt-3 rounded-[12px] border border-foreground/[0.065] bg-foreground/[0.018] px-3 py-2.5">
+                    <div className="flex items-center gap-1.5">
+                      {automation.verification.status === "passed" ? (
+                        <CheckCircle2Icon aria-hidden className="size-3 text-success" />
+                      ) : null}
+                      <p className="text-[11px] font-medium text-foreground/78">
+                        Verification evidence
+                      </p>
+                    </div>
+                    {automation.verification.summary ? (
+                      <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/70">
+                        {automation.verification.summary}
+                      </p>
+                    ) : null}
+                    <ul className="mt-2.5 space-y-2">
                       {automation.verification.evidence.slice(0, 4).map((evidence) => (
                         <li
                           key={`${evidence.check}:${evidence.detail}`}
                           className="text-[11px] leading-4"
                         >
-                          <p className="font-medium text-foreground/76">{evidence.check}</p>
-                          <p className="mt-0.5 text-muted-foreground/65">{evidence.detail}</p>
+                          <p className="font-medium text-foreground/78">{evidence.check}</p>
+                          <p className="mt-0.5 text-muted-foreground/70">{evidence.detail}</p>
                         </li>
                       ))}
                     </ul>
@@ -1466,6 +1477,15 @@ function KanbanInspector(props: {
                         +{automation.verification.evidence.length - 4} more checks in chat
                       </p>
                     ) : null}
+                  </div>
+                ) : automation.verification.summary ? (
+                  <div className="mt-3">
+                    <p className="text-[11px] font-medium text-foreground/72">
+                      Verification summary
+                    </p>
+                    <p className="mt-1 text-[11px] leading-4 text-muted-foreground/70">
+                      {automation.verification.summary}
+                    </p>
                   </div>
                 ) : null}
               </section>
@@ -1480,7 +1500,11 @@ function KanbanInspector(props: {
                   id="kanban-progress-heading"
                   className="text-[12px] font-medium text-foreground/82"
                 >
-                  Live activity
+                  {automation?.stage === "complete" ||
+                  automation?.stage === "failed" ||
+                  automation?.stage === "cancelled"
+                    ? "Recent activity"
+                    : "Live activity"}
                 </h3>
                 {details.tasks.length > 0 ? (
                   <span className="text-[11px] tabular-nums text-muted-foreground">
@@ -1500,7 +1524,7 @@ function KanbanInspector(props: {
                       <span
                         className={cn(
                           "min-w-0 flex-1",
-                          task.status === "completed" && "text-muted-foreground/65",
+                          task.status === "completed" && "text-muted-foreground/72",
                         )}
                       >
                         {task.title}

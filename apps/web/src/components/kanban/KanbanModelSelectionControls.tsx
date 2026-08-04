@@ -84,10 +84,10 @@ export function KanbanModelSelectionControls(props: {
 
   return (
     <div role="group" aria-labelledby={labelId}>
-      <p id={labelId} className="mb-1.5 text-[12px] font-medium leading-4 text-foreground/78">
+      <p id={labelId} className="mb-1.5 text-[12px] font-medium leading-4 text-foreground/82">
         {props.label ?? "Agent runtime"}
       </p>
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] p-1.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-[12px] border border-foreground/[0.07] bg-foreground/[0.018] p-1.5">
         <ProviderModelPicker
           activeInstanceId={value.instanceId}
           model={value.model}
@@ -119,7 +119,7 @@ export function KanbanModelSelectionControls(props: {
           }
         />
       </div>
-      <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/60">
+      <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/68">
         {props.helpText ??
           "The selected provider, model, reasoning level, and speed settings apply to this task only."}
       </p>

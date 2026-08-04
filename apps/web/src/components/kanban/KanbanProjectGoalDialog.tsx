@@ -276,7 +276,7 @@ export function KanbanProjectGoalDialog(props: {
   return (
     <Dialog open={props.open} onOpenChange={(open) => !submitting && props.onOpenChange(open)}>
       <DialogPopup className="max-w-[42rem] overflow-hidden">
-        <DialogHeader className="gap-1.5 px-6 pb-4 pt-5">
+        <DialogHeader className="gap-1.5 px-6 pb-3.5 pt-5">
           <DialogTitle className="flex items-center gap-2 text-base font-medium leading-5">
             <WorkflowIcon aria-hidden className="size-4 text-muted-foreground" />
             Autonomous workflow
@@ -286,7 +286,7 @@ export function KanbanProjectGoalDialog(props: {
             agents, verify the result, and integrate it according to your review mode.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="space-y-5 px-6 pb-5 pt-0">
+        <DialogPanel className="space-y-4 px-6 pb-4 pt-0">
           <div>
             <RequiredLabel htmlFor="kanban-workflow-objective">Objective</RequiredLabel>
             <Textarea
@@ -295,7 +295,7 @@ export function KanbanProjectGoalDialog(props: {
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
               placeholder="Build an accessible project settings experience with persistence, tests, and migration safety."
-              className="min-h-32"
+              className="min-h-24"
               autoFocus
             />
           </div>
@@ -307,7 +307,7 @@ export function KanbanProjectGoalDialog(props: {
               value={baseBranch}
               onChange={(event) => setBaseBranch(event.target.value)}
             />
-            <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/60">
+            <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/68">
               Worktrees branch from here and verified changes integrate back into this branch.
             </p>
           </div>
@@ -327,7 +327,7 @@ export function KanbanProjectGoalDialog(props: {
             >
               <label
                 className={cn(
-                  "flex cursor-pointer items-start gap-2.5 rounded-[14px] border px-3.5 py-3 transition-colors",
+                  "flex cursor-pointer items-start gap-2.5 rounded-[12px] border px-3 py-2.5 transition-colors",
                   mode === "review"
                     ? "border-primary/30 bg-primary/[0.045]"
                     : "border-foreground/[0.07] bg-foreground/[0.018] hover:bg-foreground/[0.035]",
@@ -345,7 +345,7 @@ export function KanbanProjectGoalDialog(props: {
               </label>
               <label
                 className={cn(
-                  "flex cursor-pointer items-start gap-2.5 rounded-[14px] border px-3.5 py-3 transition-colors",
+                  "flex cursor-pointer items-start gap-2.5 rounded-[12px] border px-3 py-2.5 transition-colors",
                   mode === "automatic"
                     ? "border-primary/30 bg-primary/[0.045]"
                     : "border-foreground/[0.07] bg-foreground/[0.018] hover:bg-foreground/[0.035]",
@@ -374,7 +374,7 @@ export function KanbanProjectGoalDialog(props: {
             helpText="Coordinates the workflow. Provider, model, reasoning, and speed settings are preserved for this role."
           />
 
-          <details className="group rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3">
+          <details className="group rounded-[12px] border border-foreground/[0.07] bg-foreground/[0.018] px-3 py-2.5">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[12px] font-medium leading-4 text-foreground/78 outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
               <span className="flex items-center gap-2">
                 <ChevronRightIcon
@@ -384,17 +384,16 @@ export function KanbanProjectGoalDialog(props: {
                 Customize agent roles
               </span>
               <span className="text-[11px] font-normal text-muted-foreground/62">
-                {customRoleCount > 0 ? `${customRoleCount} custom` : "All inherit orchestrator"}
+                {customRoleCount > 0
+                  ? `${customRoleCount} ${customRoleCount === 1 ? "override" : "overrides"}`
+                  : "Inherits by default"}
               </span>
             </summary>
-            <div className="mt-3 space-y-2.5 border-t border-foreground/[0.055] pt-3">
+            <div className="mt-3 divide-y divide-foreground/[0.055] border-t border-foreground/[0.055] pt-1">
               {WORKFLOW_ROLE_DEFINITIONS.map((definition) => {
                 const selection = roleOverrides[definition.role];
                 return (
-                  <div
-                    key={definition.role}
-                    className="rounded-[14px] border border-foreground/[0.065] bg-background/35 px-3 py-2.5"
-                  >
+                  <div key={definition.role} className="py-2.5">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <p className="text-[12px] font-medium text-foreground/84">
@@ -431,32 +430,29 @@ export function KanbanProjectGoalDialog(props: {
                           helpText="This role overrides the orchestrator runtime for this workflow."
                         />
                       </div>
-                    ) : (
-                      <p className="mt-2 text-[11px] leading-4 text-muted-foreground/58">
-                        Uses the orchestrator runtime.
-                      </p>
-                    )}
+                    ) : null}
                   </div>
                 );
               })}
             </div>
           </details>
 
-          <div className="rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3 text-[12px] leading-[1.45] text-muted-foreground/72">
+          <p className="border-t border-foreground/[0.065] pt-3 text-[11px] leading-4 text-muted-foreground/70">
             {mode === "automatic"
-              ? "FACT3 will start immediately and continue through planning, worktrees, verification, conflict resolution, and integration. Permissions and unresolved decisions still pause the workflow."
-              : "FACT3 will start immediately, then pause after the plan and before final integration so you can inspect the evidence and decide what ships."}
-            <span className="mt-1.5 block text-[11px] text-muted-foreground/58">
-              Starting also enables Autopilot, dedicated worktrees, and verification for this
-              project.
-            </span>
-          </div>
+              ? "Fully autonomous continues through verified integration; permissions and unresolved decisions still pause it."
+              : "Review checkpoints pause after planning and before final integration so you decide what ships."}{" "}
+            Starting enables Autopilot, dedicated worktrees, and verification for this project.
+          </p>
         </DialogPanel>
-        <DialogFooter className="bg-muted/56 px-6 py-3.5">
+        <DialogFooter className="bg-muted/44 px-6 py-3.5">
           <Button variant="ghost" onClick={() => props.onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={() => void submit()} disabled={!canSubmit}>
+          <Button
+            className="disabled:bg-foreground/[0.06] disabled:text-muted-foreground/55 disabled:opacity-100"
+            onClick={() => void submit()}
+            disabled={!canSubmit}
+          >
             {submitting ? <OpenTuiSpinner name="dots" /> : <WorkflowIcon aria-hidden />}
             Start workflow
           </Button>
