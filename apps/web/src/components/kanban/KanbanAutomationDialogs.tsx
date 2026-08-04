@@ -182,6 +182,9 @@ export function KanbanNewTaskDialog(props: {
         threadId,
         automation: {
           taskKind: "implementation",
+          workflowId: null,
+          workflowTaskKey: null,
+          role: "worker",
           goal: goal.trim(),
           acceptanceCriteria: criteria
             .split("\n")
@@ -202,7 +205,12 @@ export function KanbanNewTaskDialog(props: {
           lastHeartbeatAt: null,
           lastError: null,
           feedback: null,
-          verification: { status: "pending", summary: null, completedAt: null },
+          verification: {
+            status: "pending",
+            summary: null,
+            evidence: [],
+            completedAt: null,
+          },
           startedAt: null,
           completedAt: null,
           createdAt,

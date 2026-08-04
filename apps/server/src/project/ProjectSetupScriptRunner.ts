@@ -5,8 +5,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProcessRunner from "../processRunner.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 
 export interface ProjectSetupScriptRunnerResultNoScript {
@@ -21,9 +23,17 @@ export interface ProjectSetupScriptRunnerResultStarted {
   readonly cwd: string;
 }
 
+export interface ProjectSetupScriptRunnerResultCompleted {
+  readonly status: "completed";
+  readonly scriptId: string;
+  readonly scriptName: string;
+  readonly cwd: string;
+}
+
 export type ProjectSetupScriptRunnerResult =
   | ProjectSetupScriptRunnerResultNoScript
-  | ProjectSetupScriptRunnerResultStarted;
+  | ProjectSetupScriptRunnerResultStarted
+  | ProjectSetupScriptRunnerResultCompleted;
 
 export interface ProjectSetupScriptRunnerInput {
   readonly threadId: string;
@@ -31,6 +41,7 @@ export interface ProjectSetupScriptRunnerInput {
   readonly projectCwd?: string;
   readonly worktreePath: string;
   readonly preferredTerminalId?: string;
+  readonly timeoutMinutes?: number;
 }
 
 export class ProjectSetupScriptOperationError extends Schema.TaggedErrorClass<ProjectSetupScriptOperationError>()(
@@ -40,7 +51,12 @@ export class ProjectSetupScriptOperationError extends Schema.TaggedErrorClass<Pr
     projectId: Schema.optional(Schema.String),
     projectCwd: Schema.optional(Schema.String),
     worktreePath: Schema.String,
-    operation: Schema.Literals(["resolveProject", "openTerminal", "writeCommand"]),
+    operation: Schema.Literals([
+      "resolveProject",
+      "openTerminal",
+      "writeCommand",
+      "executeCommand",
+    ]),
     cause: Schema.Defect(),
   },
 ) {
@@ -75,16 +91,20 @@ export class ProjectSetupScriptRunner extends Context.Service<
     readonly runForThread: (
       input: ProjectSetupScriptRunnerInput,
     ) => Effect.Effect<ProjectSetupScriptRunnerResult, ProjectSetupScriptRunnerError>;
+    readonly runForThreadAndWait?: (
+      input: ProjectSetupScriptRunnerInput,
+    ) => Effect.Effect<ProjectSetupScriptRunnerResult, ProjectSetupScriptRunnerError>;
   }
 >()("t3/project/ProjectSetupScriptRunner") {}
 
 export const make = Effect.gen(function* () {
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
   const terminalManager = yield* TerminalManager.TerminalManager;
+  const processRunner = yield* ProcessRunner.ProcessRunner;
 
-  const runForThread: ProjectSetupScriptRunner["Service"]["runForThread"] = Effect.fn(
-    "ProjectSetupScriptRunner.runForThread",
-  )(function* (input) {
+  const resolveProject = Effect.fn("ProjectSetupScriptRunner.resolveProject")(function* (
+    input: ProjectSetupScriptRunnerInput,
+  ) {
     const errorContext = {
       threadId: input.threadId,
       worktreePath: input.worktreePath,
@@ -119,10 +139,22 @@ export const make = Effect.gen(function* () {
             ),
           )
         : null);
-
     if (!project) {
       return yield* new ProjectSetupScriptProjectNotFoundError(errorContext);
     }
+    return project;
+  });
+
+  const runForThread: ProjectSetupScriptRunner["Service"]["runForThread"] = Effect.fn(
+    "ProjectSetupScriptRunner.runForThread",
+  )(function* (input) {
+    const errorContext = {
+      threadId: input.threadId,
+      worktreePath: input.worktreePath,
+      ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+      ...(input.projectCwd === undefined ? {} : { projectCwd: input.projectCwd }),
+    };
+    const project = yield* resolveProject(input);
 
     const script = setupProjectScript(project.scripts);
     if (!script) {
@@ -182,7 +214,70 @@ export const make = Effect.gen(function* () {
     } as const;
   });
 
-  return ProjectSetupScriptRunner.of({ runForThread });
+  const runForThreadAndWait: NonNullable<
+    ProjectSetupScriptRunner["Service"]["runForThreadAndWait"]
+  > = Effect.fn("ProjectSetupScriptRunner.runForThreadAndWait")(function* (input) {
+    const project = yield* resolveProject(input);
+    const script = setupProjectScript(project.scripts);
+    if (!script) return { status: "no-script" } as const;
+
+    const platform = yield* HostProcessPlatform;
+    const cwd = input.worktreePath;
+    const env = projectScriptRuntimeEnv({
+      project: { cwd: project.workspaceRoot },
+      worktreePath: input.worktreePath,
+    });
+    const command = platform === "win32" ? "powershell.exe" : "/bin/sh";
+    const args =
+      platform === "win32"
+        ? ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script.command]
+        : ["-lc", script.command];
+    const result = yield* processRunner
+      .run({
+        command,
+        args,
+        cwd,
+        env,
+        timeout: { minutes: input.timeoutMinutes ?? 60 },
+        maxOutputBytes: 64 * 1024,
+        outputMode: "truncate",
+      })
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProjectSetupScriptOperationError({
+              threadId: input.threadId,
+              worktreePath: input.worktreePath,
+              ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+              ...(input.projectCwd === undefined ? {} : { projectCwd: input.projectCwd }),
+              operation: "executeCommand",
+              cause,
+            }),
+        ),
+      );
+    if (result.code !== 0 || result.timedOut) {
+      return yield* new ProjectSetupScriptOperationError({
+        threadId: input.threadId,
+        worktreePath: input.worktreePath,
+        ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
+        ...(input.projectCwd === undefined ? {} : { projectCwd: input.projectCwd }),
+        operation: "executeCommand",
+        cause: new Error(
+          result.timedOut
+            ? "The setup script exceeded its runtime limit."
+            : `The setup script exited with code ${String(result.code)}.`,
+        ),
+      });
+    }
+    return {
+      status: "completed",
+      scriptId: script.id,
+      scriptName: script.name,
+      cwd,
+    } as const;
+  });
+
+  return ProjectSetupScriptRunner.of({ runForThread, runForThreadAndWait });
 });
 
 export const layer = Layer.effect(ProjectSetupScriptRunner, make);

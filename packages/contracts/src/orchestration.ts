@@ -218,6 +218,36 @@ export const OrchestrationAutomationDeliveryMode = Schema.Literals([
 ]);
 export type OrchestrationAutomationDeliveryMode = typeof OrchestrationAutomationDeliveryMode.Type;
 
+export const OrchestrationAutomationRole = Schema.Literals([
+  "orchestrator",
+  "planner",
+  "worker",
+  "verifier",
+  "integrator",
+  "visual",
+]);
+export type OrchestrationAutomationRole = typeof OrchestrationAutomationRole.Type;
+
+export const OrchestrationAutonomousWorkflowMode = Schema.Literals(["review", "automatic"]);
+export type OrchestrationAutonomousWorkflowMode = typeof OrchestrationAutonomousWorkflowMode.Type;
+
+export const OrchestrationAutonomousWorkflowRoles = Schema.Struct({
+  orchestrator: ModelSelection,
+  planner: ModelSelection,
+  worker: ModelSelection,
+  verifier: ModelSelection,
+  integrator: ModelSelection,
+  visual: ModelSelection,
+});
+export type OrchestrationAutonomousWorkflowRoles = typeof OrchestrationAutonomousWorkflowRoles.Type;
+
+export const OrchestrationAutonomousWorkflowConfig = Schema.Struct({
+  mode: OrchestrationAutonomousWorkflowMode,
+  roles: OrchestrationAutonomousWorkflowRoles,
+});
+export type OrchestrationAutonomousWorkflowConfig =
+  typeof OrchestrationAutonomousWorkflowConfig.Type;
+
 export const OrchestrationProjectAutomationPolicy = Schema.Struct({
   enabled: Schema.Boolean,
   maxConcurrentRuns: PositiveInt.check(Schema.isLessThanOrEqualTo(8)),
@@ -252,8 +282,16 @@ export const OrchestrationAutomationTaskKind = Schema.Literals(["implementation"
 export type OrchestrationAutomationTaskKind = typeof OrchestrationAutomationTaskKind.Type;
 
 export const OrchestrationAutomationVerification = Schema.Struct({
-  status: Schema.Literals(["pending", "running", "passed", "failed"]),
+  status: Schema.Literals(["pending", "running", "passed", "failed", "skipped"]),
   summary: Schema.NullOr(TrimmedNonEmptyString),
+  evidence: Schema.Array(
+    Schema.Struct({
+      check: TrimmedNonEmptyString.check(Schema.isMaxLength(1_000)),
+      detail: TrimmedNonEmptyString.check(Schema.isMaxLength(2_000)),
+    }),
+  )
+    .check(Schema.isMaxLength(24))
+    .pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   completedAt: Schema.NullOr(IsoDateTime),
 });
 export type OrchestrationAutomationVerification = typeof OrchestrationAutomationVerification.Type;
@@ -262,6 +300,14 @@ export const OrchestrationThreadAutomation = Schema.Struct({
   taskKind: OrchestrationAutomationTaskKind.pipe(
     Schema.withDecodingDefault(Effect.succeed("implementation" as const)),
   ),
+  workflowId: Schema.NullOr(ThreadId).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  workflowTaskKey: Schema.NullOr(TrimmedNonEmptyString.check(Schema.isMaxLength(128))).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  role: OrchestrationAutomationRole.pipe(
+    Schema.withDecodingDefault(Effect.succeed("worker" as const)),
+  ),
+  workflowConfig: Schema.optional(OrchestrationAutonomousWorkflowConfig),
   goal: TrimmedNonEmptyString.check(Schema.isMaxLength(20_000)),
   acceptanceCriteria: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(2_000))).check(
     Schema.isMaxLength(24),

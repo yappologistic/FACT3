@@ -11,6 +11,8 @@ import {
   firstUserGoal,
   groupKanbanThreads,
   incompleteAutomationDependencies,
+  isAutomaticWorkflowCoordinator,
+  isKanbanReviewDeliveryReady,
   isKanbanThreadVerified,
   latestCheckpointSummary,
   liveKanbanAutomation,
@@ -52,6 +54,9 @@ function thread(
 function automation(): NonNullable<EnvironmentThreadShell["automation"]> {
   return {
     taskKind: "implementation",
+    workflowId: null,
+    workflowTaskKey: null,
+    role: "worker",
     goal: "Ship the board",
     acceptanceCriteria: [],
     dependencies: [],
@@ -66,7 +71,7 @@ function automation(): NonNullable<EnvironmentThreadShell["automation"]> {
     lastHeartbeatAt: null,
     lastError: null,
     feedback: null,
-    verification: { status: "pending", summary: null, completedAt: null },
+    verification: { status: "pending", summary: null, evidence: [], completedAt: null },
     startedAt: null,
     completedAt: null,
     createdAt: NOW,
@@ -78,6 +83,9 @@ describe("Kanban board lifecycle", () => {
   it("prefers the live shell automation over a stale cached detail", () => {
     const stale = {
       taskKind: "implementation" as const,
+      workflowId: null,
+      workflowTaskKey: null,
+      role: "worker" as const,
       goal: "Ship the board",
       acceptanceCriteria: [],
       dependencies: [],
@@ -92,7 +100,12 @@ describe("Kanban board lifecycle", () => {
       lastHeartbeatAt: NOW,
       lastError: null,
       feedback: null,
-      verification: { status: "running" as const, summary: null, completedAt: null },
+      verification: {
+        status: "running" as const,
+        summary: null,
+        evidence: [],
+        completedAt: null,
+      },
       startedAt: NOW,
       completedAt: null,
       createdAt: NOW,
@@ -104,6 +117,7 @@ describe("Kanban board lifecycle", () => {
       verification: {
         status: "passed" as const,
         summary: "Verification passed.",
+        evidence: [{ check: "Focused tests", detail: "Passed" }],
         completedAt: NOW,
       },
     };
@@ -114,6 +128,9 @@ describe("Kanban board lifecycle", () => {
   it("maps durable automation stages to purposeful board lanes", () => {
     const automation = {
       taskKind: "implementation" as const,
+      workflowId: null,
+      workflowTaskKey: null,
+      role: "worker" as const,
       goal: "Ship the board",
       acceptanceCriteria: [],
       dependencies: [],
@@ -127,7 +144,12 @@ describe("Kanban board lifecycle", () => {
       lastHeartbeatAt: null,
       lastError: null,
       feedback: null,
-      verification: { status: "pending" as const, summary: null, completedAt: null },
+      verification: {
+        status: "pending" as const,
+        summary: null,
+        evidence: [],
+        completedAt: null,
+      },
       startedAt: null,
       completedAt: null,
       createdAt: NOW,
@@ -152,6 +174,52 @@ describe("Kanban board lifecycle", () => {
     expect(describeKanbanThreadState(queued)).toBe("Queued");
   });
 
+  it("keeps an automatic workflow root visibly coordinating until integration finishes", () => {
+    const selection = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.6-sol",
+    };
+    const root = thread({
+      id: ThreadId.make("workflow-root"),
+      automation: {
+        ...automation(),
+        taskKind: "planning",
+        workflowId: ThreadId.make("workflow-root"),
+        role: "orchestrator",
+        workflowConfig: {
+          mode: "automatic",
+          roles: {
+            orchestrator: selection,
+            planner: selection,
+            worker: selection,
+            verifier: selection,
+            integrator: selection,
+            visual: selection,
+          },
+        },
+        stage: "review",
+      },
+    });
+
+    expect(classifyKanbanThread(root, NOW)).toBe("running");
+    expect(describeKanbanThreadState(root)).toBe("Coordinating");
+    expect(isAutomaticWorkflowCoordinator(root.automation)).toBe(true);
+  });
+
+  it("requires a clean integration worktree before human approval", () => {
+    const base = {
+      taskKind: "implementation" as const,
+      workflowIntegration: true,
+      gitStatusAvailable: true,
+      deliveryMode: "pull-request" as const,
+      pullRequestOpen: false,
+      aheadCount: 3,
+    };
+
+    expect(isKanbanReviewDeliveryReady({ ...base, hasWorkingTreeChanges: true })).toBe(false);
+    expect(isKanbanReviewDeliveryReady({ ...base, hasWorkingTreeChanges: false })).toBe(true);
+  });
+
   it("only calls review work verified when verification evidence passed", () => {
     const legacy = thread({ id: ThreadId.make("legacy-review") });
     const unverified = thread({
@@ -163,7 +231,12 @@ describe("Kanban board lifecycle", () => {
       automation: {
         ...automation(),
         stage: "review",
-        verification: { status: "passed", summary: "Focused tests passed.", completedAt: NOW },
+        verification: {
+          status: "passed",
+          summary: "Focused tests passed.",
+          evidence: [{ check: "Focused tests", detail: "Passed" }],
+          completedAt: NOW,
+        },
       },
     });
 
@@ -180,6 +253,9 @@ describe("Kanban board lifecycle", () => {
       id: ThreadId.make("dependency"),
       automation: {
         taskKind: "implementation",
+        workflowId: null,
+        workflowTaskKey: null,
+        role: "worker",
         goal: "Build dependency",
         acceptanceCriteria: [],
         dependencies: [],
@@ -194,7 +270,7 @@ describe("Kanban board lifecycle", () => {
         lastHeartbeatAt: NOW,
         lastError: null,
         feedback: null,
-        verification: { status: "pending", summary: null, completedAt: null },
+        verification: { status: "pending", summary: null, evidence: [], completedAt: null },
         startedAt: NOW,
         completedAt: null,
         createdAt: NOW,
@@ -222,6 +298,44 @@ describe("Kanban board lifecycle", () => {
     expect(incompleteAutomationDependencies(dependent, [completedDependency, dependent])).toEqual(
       [],
     );
+  });
+
+  it("does not present an automatic workflow coordinator as a dependency blocker", () => {
+    const selection = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.6-sol",
+    };
+    const coordinator = thread({
+      id: ThreadId.make("workflow-root"),
+      automation: {
+        ...automation(),
+        taskKind: "planning",
+        workflowId: ThreadId.make("workflow-root"),
+        role: "orchestrator",
+        workflowConfig: {
+          mode: "automatic",
+          roles: {
+            orchestrator: selection,
+            planner: selection,
+            worker: selection,
+            verifier: selection,
+            integrator: selection,
+            visual: selection,
+          },
+        },
+        stage: "review",
+      },
+    });
+    const dependent = thread({
+      id: ThreadId.make("implementation"),
+      automation: {
+        ...automation(),
+        workflowId: coordinator.id,
+        dependencies: [coordinator.id],
+      },
+    });
+
+    expect(incompleteAutomationDependencies(dependent, [coordinator, dependent])).toEqual([]);
   });
 
   it("identifies scope conflicts only against active work", () => {
@@ -302,6 +416,7 @@ describe("Kanban board summaries", () => {
           acceptanceCriteria: ["Contract tests pass"],
           dependsOn: [],
           changeScopes: ["packages/contracts/src/**"],
+          role: "worker",
           model: "gpt-5.6-sol",
           reasoningEffort: "high",
           verification: ["vp test run packages/contracts/src/orchestration.test.ts"],
@@ -313,6 +428,7 @@ describe("Kanban board summaries", () => {
           acceptanceCriteria: ["Focused UI tests pass"],
           dependsOn: ["contracts"],
           changeScopes: ["apps/web/src/components/kanban/**"],
+          role: "worker",
           model: "gpt-5.6-terra",
           reasoningEffort: "medium",
           verification: ["vp test run apps/web/src/components/kanban"],

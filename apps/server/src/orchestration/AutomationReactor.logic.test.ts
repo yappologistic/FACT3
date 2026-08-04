@@ -6,6 +6,7 @@ import {
   TurnId,
   type OrchestrationProjectAutomationPolicy,
   type OrchestrationProject,
+  type OrchestrationAutonomousWorkflowConfig,
   type OrchestrationThread,
   type OrchestrationThreadAutomation,
 } from "@t3tools/contracts";
@@ -14,13 +15,19 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   automationAvailableSlots,
   automationCanRetry,
+  automationNeedsStartupRecovery,
   automationConflictBlockers,
   automationConcurrencyLimit,
+  automationDependencyTerminalBlockers,
+  automationDispatchAdoptionDeadline,
   automationDispatchCompletion,
+  automationDispatchStartExpired,
   automationFailureCanRetry,
   automationIsStalled,
+  automationRetryDecision,
   automationStuckDeadline,
   buildAutomationPrompt,
+  classifyAutomationFailure,
   resolveAutomationDependencyBranches,
   selectRunnableAutomationTasks,
 } from "./AutomationReactor.logic.ts";
@@ -38,6 +45,23 @@ const policy: OrchestrationProjectAutomationPolicy = {
   deliveryMode: "local-commit",
 };
 
+const modelSelection = (model: string) => ({
+  instanceId: ProviderInstanceId.make("codex"),
+  model,
+});
+
+const workflowConfig: OrchestrationAutonomousWorkflowConfig = {
+  mode: "automatic",
+  roles: {
+    orchestrator: modelSelection("orchestrator-model"),
+    planner: modelSelection("planner-model"),
+    worker: modelSelection("worker-model"),
+    verifier: modelSelection("verifier-model"),
+    integrator: modelSelection("integrator-model"),
+    visual: modelSelection("visual-model"),
+  },
+};
+
 function task(input: {
   readonly id: string;
   readonly stage: OrchestrationThreadAutomation["stage"];
@@ -46,6 +70,12 @@ function task(input: {
   readonly maxAttempts?: number;
   readonly changeScopes?: ReadonlyArray<string>;
   readonly taskKind?: OrchestrationThreadAutomation["taskKind"];
+  readonly role?: OrchestrationThreadAutomation["role"];
+  readonly phase?: OrchestrationThreadAutomation["phase"];
+  readonly lastError?: string | null;
+  readonly workflowConfig?: OrchestrationAutonomousWorkflowConfig;
+  readonly workflowId?: ThreadId | null;
+  readonly acceptanceCriteria?: ReadonlyArray<string>;
   readonly branch?: string | null;
 }): OrchestrationThread {
   const id = ThreadId.make(input.id);
@@ -53,7 +83,7 @@ function task(input: {
     id,
     projectId: ProjectId.make("project"),
     title: input.id,
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
+    modelSelection: modelSelection("gpt-5.6-sol"),
     runtimeMode: "full-access",
     interactionMode: "default",
     branch: input.branch === undefined ? "main" : input.branch,
@@ -74,26 +104,45 @@ function task(input: {
     session: null,
     automation: {
       taskKind: input.taskKind ?? "implementation",
+      workflowId: input.workflowId === undefined ? ThreadId.make("workflow") : input.workflowId,
+      workflowTaskKey: input.id,
+      role: input.role ?? "worker",
+      ...(input.workflowConfig ? { workflowConfig: input.workflowConfig } : {}),
       goal: input.id,
-      acceptanceCriteria: [],
+      acceptanceCriteria: input.acceptanceCriteria ?? [],
       dependencies: input.dependencies ?? [],
       changeScopes: input.changeScopes ?? [],
       baseBranch: "main",
       stage: input.stage,
-      phase: "implementation",
+      phase: input.phase ?? "implementation",
       attempt: input.attempt ?? 0,
       maxAttempts: input.maxAttempts ?? 2,
       maxRuntimeMinutes: 60,
       leaseExpiresAt: null,
       lastHeartbeatAt: null,
-      lastError: null,
+      lastError: input.lastError ?? null,
       feedback: null,
-      verification: { status: "pending", summary: null, completedAt: null },
+      verification: { status: "pending", summary: null, evidence: [], completedAt: null },
       startedAt: null,
       completedAt: null,
       createdAt: NOW,
       updatedAt: NOW,
     },
+  };
+}
+
+function projectFor(thread: OrchestrationThread): OrchestrationProject {
+  return {
+    id: thread.projectId,
+    title: "FACT3",
+    workspaceRoot: "D:/FACT3",
+    repositoryIdentity: null,
+    defaultModelSelection: thread.modelSelection,
+    scripts: [],
+    automationPolicy: policy,
+    createdAt: NOW,
+    updatedAt: NOW,
+    deletedAt: null,
   };
 }
 
@@ -132,6 +181,50 @@ describe("automation scheduler decisions", () => {
         tasks: [dependent, missingBranch, unfinished],
       }),
     ).toEqual({ branches: [], missing: ["missing branch", "unfinished", "unknown"] });
+  });
+
+  it("surfaces terminal dependency blockers without treating ordinary waits as failures", () => {
+    const failed = task({ id: "failed", stage: "failed", lastError: "Focused tests failed." });
+    const cancelled = task({ id: "cancelled", stage: "cancelled" });
+    const running = task({ id: "running", stage: "running" });
+    const manual = { ...task({ id: "manual", stage: "ready" }), automation: undefined };
+    const dependent = task({
+      id: "dependent",
+      stage: "ready",
+      dependencies: [failed.id, cancelled.id, running.id, manual.id, ThreadId.make("deleted")],
+    });
+
+    expect(
+      automationDependencyTerminalBlockers({
+        thread: dependent,
+        tasks: [dependent, failed, cancelled, running, manual],
+      }),
+    ).toEqual([
+      {
+        dependencyId: failed.id,
+        title: "failed",
+        reason: "failed",
+        detail: "Dependency 'failed' failed: Focused tests failed.",
+      },
+      {
+        dependencyId: cancelled.id,
+        title: "cancelled",
+        reason: "cancelled",
+        detail: "Dependency 'cancelled' was cancelled. Reopen it or replan the dependent work.",
+      },
+      {
+        dependencyId: manual.id,
+        title: "manual",
+        reason: "not-automated",
+        detail: "Dependency 'manual' is not an autonomous task and cannot satisfy this workflow.",
+      },
+      {
+        dependencyId: "deleted",
+        title: "deleted",
+        reason: "missing",
+        detail: "Dependency 'deleted' is no longer available. Replan or remove this dependency.",
+      },
+    ]);
   });
 
   it("forces serial execution without worktrees", () => {
@@ -177,6 +270,50 @@ describe("automation scheduler decisions", () => {
         availableSlots: 1,
       }).map((candidate) => candidate.id),
     ).toEqual([blockedByComplete.id]);
+  });
+
+  it("treats an automatic workflow root in coordination as a satisfied barrier", () => {
+    const root = task({
+      id: "workflow-root",
+      stage: "review",
+      taskKind: "planning",
+      workflowConfig,
+      workflowId: ThreadId.make("workflow-root"),
+    });
+    const child = task({
+      id: "child",
+      stage: "ready",
+      dependencies: [root.id],
+    });
+
+    expect(
+      selectRunnableAutomationTasks({ tasks: [root, child], availableSlots: 1 }).map(
+        (candidate) => candidate.id,
+      ),
+    ).toEqual([child.id]);
+    expect(resolveAutomationDependencyBranches({ thread: child, tasks: [root, child] })).toEqual({
+      branches: [],
+      missing: [],
+    });
+  });
+
+  it("does not redispatch a ready task until its previous provider turn is quiescent", () => {
+    const ready = task({ id: "ready-but-stopping", stage: "ready" });
+    const stopping: OrchestrationThread = {
+      ...ready,
+      session: {
+        threadId: ready.id,
+        status: "running",
+        providerName: "Codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: NOW,
+      },
+    };
+
+    expect(selectRunnableAutomationTasks({ tasks: [stopping], availableSlots: 1 })).toEqual([]);
   });
 
   it("keeps overlapping change scopes out of the same parallel batch", () => {
@@ -261,24 +398,154 @@ describe("automation scheduler decisions", () => {
   });
 
   it("gives planning tasks a read-only structured-output contract", () => {
-    const planning = task({ id: "project-plan", stage: "running", taskKind: "planning" });
-    const project: OrchestrationProject = {
-      id: planning.projectId,
-      title: "FACT3",
-      workspaceRoot: "D:/FACT3",
-      repositoryIdentity: null,
-      defaultModelSelection: planning.modelSelection,
-      scripts: [],
-      automationPolicy: policy,
-      createdAt: NOW,
-      updatedAt: NOW,
-      deletedAt: null,
-    };
-    const prompt = buildAutomationPrompt({ thread: planning, project, policy });
+    const planning = task({
+      id: "project-plan",
+      stage: "running",
+      taskKind: "planning",
+      role: "planner",
+      workflowConfig,
+    });
+    const prompt = buildAutomationPrompt({
+      thread: planning,
+      project: projectFor(planning),
+      policy,
+    });
     expect(prompt).toContain("Inspect the repository read-only");
     expect(prompt).toContain('"changeScopes"');
-    expect(prompt).toContain('"reasoningEffort"');
+    expect(prompt).toContain('"role":"worker|visual"');
+    expect(prompt).toContain("Role models are configured by the user");
+    expect(prompt).toContain("visual=visual-model");
     expect(prompt).toContain("Do not edit files, commit, push, or open a pull request.");
+  });
+
+  it("gives root orchestrators executable plan JSON before a corrected plan audit", () => {
+    const planning = task({
+      id: "initial-plan",
+      stage: "running",
+      taskKind: "planning",
+      role: "orchestrator",
+    });
+    const planAudit = task({
+      id: "audit-plan",
+      stage: "running",
+      taskKind: "planning",
+      role: "orchestrator",
+      phase: "verification",
+    });
+    const finalAudit = task({ id: "final-audit", stage: "running", role: "orchestrator" });
+
+    const planningPrompt = buildAutomationPrompt({
+      thread: planning,
+      project: projectFor(planning),
+      policy,
+    });
+    const planAuditPrompt = buildAutomationPrompt({
+      thread: planAudit,
+      project: projectFor(planAudit),
+      policy,
+    });
+    const finalPrompt = buildAutomationPrompt({
+      thread: finalAudit,
+      project: projectFor(finalAudit),
+      policy,
+    });
+
+    expect(planningPrompt).toContain("planning a real autonomous FACT3 Kanban project");
+    expect(planningPrompt).toContain('"tasks"');
+    expect(planningPrompt).toContain('"role":"worker|visual"');
+    expect(planAuditPrompt).toContain("auditing the prior autonomous FACT3 project plan");
+    expect(planAuditPrompt).toContain("Return a corrected final plan");
+    expect(planAuditPrompt).toContain('"tasks"');
+    expect(planAuditPrompt).not.toContain('"requiredChanges"');
+    expect(planAuditPrompt).not.toContain('"status":"approved');
+    expect(finalPrompt).toContain("performing the final audit");
+    expect(finalPrompt).toContain('"status":"complete|repair-required|needs-input"');
+    expect(finalPrompt).toContain('"followUpTasks"');
+  });
+
+  it("requires verifier evidence and keeps verification independent from repairs", () => {
+    const verifier = task({
+      id: "verify-search",
+      stage: "running",
+      role: "verifier",
+      phase: "verification",
+      acceptanceCriteria: ["Keyboard navigation works"],
+    });
+    const prompt = buildAutomationPrompt({
+      thread: verifier,
+      project: projectFor(verifier),
+      policy,
+    });
+
+    expect(prompt).toContain("independent verifier");
+    expect(prompt).toContain("Do not modify the implementation");
+    expect(prompt).toContain('"summary":"one sentence"');
+    expect(prompt).toContain('"checks"');
+    expect(prompt).toContain('"status":"passed|failed"');
+    expect(prompt).not.toContain('"evidence"');
+    expect(prompt).toContain("one check for every acceptance criterion");
+    expect(prompt).toContain("Set status=failed when any criterion or required check is unmet");
+  });
+
+  it("instructs integrators to preserve intent while resolving dependency conflicts", () => {
+    const integrator = task({ id: "integrate-workflow", stage: "running", role: "integrator" });
+    const prompt = buildAutomationPrompt({
+      thread: integrator,
+      project: projectFor(integrator),
+      policy,
+      dependencyBranches: ["t3code/contracts", "t3code/web"],
+    });
+
+    expect(prompt).toContain("dedicated integration worktree");
+    expect(prompt).toContain("declared dependency order");
+    expect(prompt).toContain("- t3code/contracts\n- t3code/web");
+    expect(prompt).toContain("resolve the conflict deliberately");
+    expect(prompt).toContain("Never discard a branch");
+    expect(prompt).toContain('"conflictsResolved"');
+  });
+
+  it("keeps workflow subtasks local while preserving legacy standalone delivery", () => {
+    const workflowTask = task({ id: "workflow-worker", stage: "running", role: "worker" });
+    const standaloneTask = task({
+      id: "standalone-worker",
+      stage: "running",
+      role: "worker",
+      workflowId: null,
+    });
+    const pullRequestPolicy = { ...policy, deliveryMode: "pull-request" as const };
+
+    const workflowPrompt = buildAutomationPrompt({
+      thread: workflowTask,
+      project: projectFor(workflowTask),
+      policy: pullRequestPolicy,
+    });
+    const standalonePrompt = buildAutomationPrompt({
+      thread: standaloneTask,
+      project: projectFor(standaloneTask),
+      policy: pullRequestPolicy,
+    });
+
+    expect(workflowPrompt).toContain("locally on this isolated workflow branch");
+    expect(workflowPrompt).toContain("FACT3 owns integration and base promotion");
+    expect(workflowPrompt).not.toContain("open a pull request. Do not merge it");
+    expect(standalonePrompt).toContain("open a pull request. Do not merge it");
+  });
+
+  it("includes adaptive recovery context instead of repeating a failed approach", () => {
+    const recovering = task({
+      id: "recover",
+      stage: "running",
+      lastError: "Typecheck failed in the Kanban package.",
+    });
+    const prompt = buildAutomationPrompt({
+      thread: recovering,
+      project: projectFor(recovering),
+      policy,
+    });
+
+    expect(prompt).toContain("Previous attempt failed (verification)");
+    expect(prompt).toContain("Use the failed checks as repair requirements");
+    expect(prompt).toContain("Do not repeat the failed approach unchanged");
   });
 
   it("stops retrying exactly at the configured attempt budget", () => {
@@ -286,6 +553,32 @@ describe("automation scheduler decisions", () => {
     expect(
       automationCanRetry(task({ id: "exhausted", stage: "failed", attempt: 2, maxAttempts: 2 })),
     ).toBe(false);
+  });
+
+  it("recovers a running task whose provider turn was lost during server startup", () => {
+    expect(automationNeedsStartupRecovery(task({ id: "lost-start", stage: "running" }))).toBe(true);
+    expect(automationNeedsStartupRecovery(task({ id: "ordinary-queue", stage: "ready" }))).toBe(
+      false,
+    );
+  });
+
+  it("retries a queued provider turn only after its adoption grace window expires", () => {
+    const running = task({ id: "queued-provider-start", stage: "running" });
+    const queued: OrchestrationThread = {
+      ...running,
+      automation: {
+        ...running.automation!,
+        lastHeartbeatAt: "2026-08-03T12:00:00.000Z",
+      },
+    };
+
+    expect(automationDispatchAdoptionDeadline(queued)).toBe("2026-08-03T12:05:00.000Z");
+    expect(
+      automationDispatchStartExpired({ thread: queued, now: "2026-08-03T12:04:59.999Z" }),
+    ).toBe(false);
+    expect(
+      automationDispatchStartExpired({ thread: queued, now: "2026-08-03T12:05:00.000Z" }),
+    ).toBe(true);
   });
 
   it("retries transient failures but stops on permanent repository setup failures", () => {
@@ -306,6 +599,78 @@ describe("automation scheduler decisions", () => {
         "Approved dependency output is unavailable for: contracts. Reopen the task.",
       ),
     ).toBe(false);
+  });
+
+  it("classifies failures into intentional recovery strategies", () => {
+    expect(classifyAutomationFailure("CONFLICT in apps/web/Kanban.tsx")).toMatchObject({
+      kind: "merge-conflict",
+      retryable: true,
+      strategy: "resolve-conflict",
+    });
+    expect(classifyAutomationFailure("Focused tests failed during verification")).toMatchObject({
+      kind: "verification",
+      retryable: true,
+      strategy: "repair-verification",
+    });
+    expect(
+      classifyAutomationFailure("The autonomous run exceeded its runtime limit"),
+    ).toMatchObject({
+      kind: "timeout",
+      retryable: true,
+      strategy: "retry",
+    });
+    expect(classifyAutomationFailure("Authentication required for the remote")).toMatchObject({
+      kind: "permission",
+      retryable: false,
+      strategy: "request-input",
+    });
+    expect(
+      classifyAutomationFailure("No supported VCS repository was detected at D:/project"),
+    ).toMatchObject({ kind: "repository-setup", retryable: false, strategy: "stop" });
+    expect(classifyAutomationFailure("The base worktree has uncommitted changes.")).toMatchObject({
+      kind: "repository-setup",
+      retryable: false,
+      strategy: "request-input",
+    });
+  });
+
+  it("bounds retries in both implementation and verification phases", () => {
+    const implementation = task({
+      id: "implementation-retry",
+      stage: "failed",
+      phase: "implementation",
+      attempt: 1,
+      maxAttempts: 2,
+    });
+    const verification = task({
+      id: "verification-retry",
+      stage: "failed",
+      phase: "verification",
+      attempt: 1,
+      maxAttempts: 2,
+    });
+
+    expect(
+      automationRetryDecision({
+        thread: implementation,
+        detail: "The provider process exited unexpectedly.",
+      }),
+    ).toMatchObject({ phase: "implementation", canRetry: true, nextAttempt: 2 });
+    expect(
+      automationRetryDecision({
+        thread: verification,
+        detail: "Verification tests failed.",
+      }),
+    ).toMatchObject({ phase: "verification", canRetry: true, nextAttempt: 2 });
+    expect(
+      automationRetryDecision({
+        thread: {
+          ...verification,
+          automation: { ...verification.automation!, attempt: 2 },
+        },
+        detail: "Verification tests failed again.",
+      }),
+    ).toMatchObject({ phase: "verification", canRetry: false, nextAttempt: 3 });
   });
 
   it("recognizes a completed dispatch after the shell clears latestTurn", () => {

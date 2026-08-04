@@ -6,6 +6,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ProcessRunner from "../processRunner.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
 import * as ProjectSetupScriptRunner from "./ProjectSetupScriptRunner.ts";
 
@@ -64,10 +65,12 @@ const makeTerminalManagerLayer = (
 const testLayer = (
   project: OrchestrationProject,
   terminal: Pick<TerminalManager.TerminalManager["Service"], "open" | "write">,
+  processRun: ProcessRunner.ProcessRunner["Service"]["run"] = () => Effect.die("unused"),
 ) =>
   ProjectSetupScriptRunner.layer.pipe(
     Layer.provideMerge(makeProjectionSnapshotQueryLayer(project)),
     Layer.provideMerge(makeTerminalManagerLayer(terminal)),
+    Layer.provideMerge(Layer.succeed(ProcessRunner.ProcessRunner, { run: processRun })),
   );
 
 describe("ProjectSetupScriptRunner", () => {
@@ -194,6 +197,114 @@ describe("ProjectSetupScriptRunner", () => {
           open: () => Effect.fail(terminalError),
           write: () => Effect.die("unexpected write"),
         }),
+      ),
+    );
+  });
+
+  it.effect("waits for an isolated setup command to exit successfully", () => {
+    const project = makeProject([
+      {
+        id: "setup",
+        name: "Setup",
+        command: "bun install",
+        icon: "configure",
+        runOnWorktreeCreate: true,
+      },
+    ]);
+    const processRun = vi.fn(() =>
+      Effect.succeed({
+        stdout: "",
+        stderr: "",
+        code: 0 as never,
+        timedOut: false,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+      const result = yield* runner.runForThreadAndWait!({
+        threadId: "thread-1",
+        projectId: "project-1",
+        worktreePath: "/repo/worktrees/a",
+        timeoutMinutes: 10,
+      });
+
+      expect(result).toEqual({
+        status: "completed",
+        scriptId: "setup",
+        scriptName: "Setup",
+        cwd: "/repo/worktrees/a",
+      });
+      expect(processRun).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: "/repo/worktrees/a",
+          timeout: { minutes: 10 },
+          env: {
+            T3CODE_PROJECT_ROOT: "/repo/project",
+            T3CODE_WORKTREE_PATH: "/repo/worktrees/a",
+          },
+        }),
+      );
+    }).pipe(
+      Effect.provide(
+        testLayer(
+          project,
+          {
+            open: () => Effect.die("unused"),
+            write: () => Effect.die("unused"),
+          },
+          processRun,
+        ),
+      ),
+    );
+  });
+
+  it.effect("fails the worktree setup when the isolated command exits non-zero", () => {
+    const project = makeProject([
+      {
+        id: "setup",
+        name: "Setup",
+        command: "bun install",
+        icon: "configure",
+        runOnWorktreeCreate: true,
+      },
+    ]);
+    const processRun = vi.fn(() =>
+      Effect.succeed({
+        stdout: "",
+        stderr: "private registry details",
+        code: 1 as never,
+        timedOut: false,
+        stdoutTruncated: false,
+        stderrTruncated: false,
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const runner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
+      const error = yield* Effect.flip(
+        runner.runForThreadAndWait!({
+          threadId: "thread-1",
+          projectId: "project-1",
+          worktreePath: "/repo/worktrees/a",
+        }),
+      );
+
+      expect(error._tag).toBe("ProjectSetupScriptOperationError");
+      expect(String(error.cause)).toContain("exited with code 1");
+      expect(String(error.cause)).not.toContain("private registry details");
+    }).pipe(
+      Effect.provide(
+        testLayer(
+          project,
+          {
+            open: () => Effect.die("unused"),
+            write: () => Effect.die("unused"),
+          },
+          processRun,
+        ),
       ),
     );
   });

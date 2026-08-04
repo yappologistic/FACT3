@@ -82,6 +82,116 @@ it.effect("automation contracts backfill autonomy fields from older snapshots", 
     });
     assert.strictEqual(automation.taskKind, "implementation");
     assert.deepStrictEqual(automation.changeScopes, []);
+    assert.strictEqual(automation.workflowId, null);
+    assert.strictEqual(automation.workflowTaskKey, null);
+    assert.strictEqual(automation.role, "worker");
+    assert.deepStrictEqual(automation.verification.evidence, []);
+  }),
+);
+
+it.effect("automation contracts preserve workflow roles and bounded verification evidence", () =>
+  Effect.gen(function* () {
+    const roleModel = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5.6-sol",
+      options: [
+        { id: "reasoningEffort", value: "high" },
+        { id: "fastMode", value: true },
+      ],
+    };
+    const automation = yield* decodeThreadAutomation({
+      taskKind: "implementation",
+      workflowId: "workflow-thread-1",
+      workflowTaskKey: "settings-ui",
+      role: "visual",
+      workflowConfig: {
+        mode: "automatic",
+        roles: {
+          orchestrator: roleModel,
+          planner: roleModel,
+          worker: roleModel,
+          verifier: roleModel,
+          integrator: roleModel,
+          visual: roleModel,
+        },
+      },
+      goal: "Ship the settings experience",
+      acceptanceCriteria: ["The settings flow is keyboard accessible."],
+      dependencies: [],
+      changeScopes: ["apps/web/src/components/settings"],
+      baseBranch: "main",
+      stage: "review",
+      phase: "verification",
+      attempt: 1,
+      maxAttempts: 2,
+      maxRuntimeMinutes: 60,
+      leaseExpiresAt: null,
+      lastHeartbeatAt: "2026-08-04T12:00:00.000Z",
+      lastError: null,
+      feedback: null,
+      verification: {
+        status: "passed",
+        summary: "The focused checks passed.",
+        evidence: [
+          {
+            check: "Keyboard navigation",
+            detail: "Completed the settings flow using Tab, Enter, and Escape.",
+          },
+        ],
+        completedAt: "2026-08-04T12:10:00.000Z",
+      },
+      startedAt: "2026-08-04T12:00:00.000Z",
+      completedAt: "2026-08-04T12:10:00.000Z",
+      createdAt: "2026-08-04T11:55:00.000Z",
+      updatedAt: "2026-08-04T12:10:00.000Z",
+    });
+
+    assert.strictEqual(automation.workflowId, "workflow-thread-1");
+    assert.strictEqual(automation.workflowTaskKey, "settings-ui");
+    assert.strictEqual(automation.role, "visual");
+    assert.strictEqual(automation.workflowConfig?.mode, "automatic");
+    assert.deepStrictEqual(automation.workflowConfig?.roles.orchestrator.options, [
+      { id: "reasoningEffort", value: "high" },
+      { id: "fastMode", value: true },
+    ]);
+    assert.deepStrictEqual(automation.verification.evidence, [
+      {
+        check: "Keyboard navigation",
+        detail: "Completed the settings flow using Tab, Enter, and Escape.",
+      },
+    ]);
+  }),
+);
+
+it.effect("automation verification can explicitly record a skipped pass", () =>
+  Effect.gen(function* () {
+    const automation = yield* decodeThreadAutomation({
+      goal: "Document the existing behavior",
+      acceptanceCriteria: ["The behavior is documented."],
+      dependencies: [],
+      baseBranch: "main",
+      stage: "review",
+      phase: "implementation",
+      attempt: 1,
+      maxAttempts: 1,
+      maxRuntimeMinutes: 30,
+      leaseExpiresAt: null,
+      lastHeartbeatAt: null,
+      lastError: null,
+      feedback: null,
+      verification: {
+        status: "skipped",
+        summary: "Verification was disabled by the workflow policy.",
+        completedAt: "2026-08-04T12:00:00.000Z",
+      },
+      startedAt: "2026-08-04T11:55:00.000Z",
+      completedAt: "2026-08-04T12:00:00.000Z",
+      createdAt: "2026-08-04T11:55:00.000Z",
+      updatedAt: "2026-08-04T12:00:00.000Z",
+    });
+
+    assert.strictEqual(automation.verification.status, "skipped");
+    assert.deepStrictEqual(automation.verification.evidence, []);
   }),
 );
 

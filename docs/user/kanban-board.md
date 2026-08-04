@@ -23,16 +23,26 @@ Open **Autopilot settings** before starting a project workflow. The project poli
 Use **Start** and **Pause** in the board status bar to control scheduling. Pausing prevents queued
 tasks from starting; it does not terminate agents that are already working.
 
-## Plan a project goal
+## Run an autonomous workflow
 
-Select **Plan project** to give FACT3 one larger outcome. A planning agent inspects the repository
-without editing it, then proposes a small execution graph. The proposal includes task ownership,
-dependencies, likely paths, model and reasoning assignments, acceptance criteria, and verification
-checks.
+Select **Autonomous workflow** to give FACT3 one larger outcome. Choose the base branch and the
+orchestrator model, then decide whether FACT3 should stop at review checkpoints or continue through
+verified integration automatically. Planning is read-only: the planner inspects the repository and
+the orchestrator audits its dependency graph before any implementation work begins.
 
-Review the proposal from its card. **Approve plan & start** creates the real task threads and turns
-on Autopilot. **Request changes** sends feedback back through the planning task without starting
-implementation.
+Starting a workflow turns on Autopilot, dedicated worktrees, and verification for the project. You
+can still pause new dispatches from the board without interrupting agents that are already running.
+
+Open **Customize agent roles** when different work needs different models. Planner, worker,
+verifier, integrator, and visual-specialist roles inherit the orchestrator by default, including its
+reasoning and speed options. An override changes only that role.
+
+In review mode, approve the proposed plan before task work begins and approve the integrated result
+before it reaches the base branch. In fully autonomous mode, FACT3 materializes the approved graph,
+runs eligible tasks in parallel worktrees, verifies each result with the selected verifier, resolves
+integration conflicts in a dedicated integration worktree, and fast-forwards the verified result to
+the base branch when the primary checkout is clean and still on that branch. Unsafe repository state
+always moves the workflow to **Needs attention** instead of overwriting local work.
 
 ## Create autonomous tasks
 
@@ -67,6 +77,10 @@ verification state, recent activity, changed files, worktree, branch, and pull r
 available. From there you can open the full diff or Chat for the task.
 
 Select the **Changes** heading or **Open diff** to inspect the complete task diff directly.
+
+Verification evidence lists the focused checks reported by the independent verifier. A successful
+agent turn without valid evidence is retried within the task's attempt budget; it is not presented as
+verified work.
 
 The review footer presents one primary action at a time. Delivery must be complete before
 **Approve task** appears; otherwise the source-control action is shown instead. Select **Request

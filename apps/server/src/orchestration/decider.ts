@@ -34,9 +34,17 @@ const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
 const AUTOMATION_STAGE_TRANSITIONS: Readonly<Record<string, ReadonlySet<string>>> = {
   planned: new Set(["planned", "ready", "cancelled"]),
   ready: new Set(["planned", "ready", "running", "failed", "cancelled"]),
-  running: new Set(["running", "needs-input", "review", "complete", "failed", "cancelled"]),
+  running: new Set([
+    "running",
+    "ready",
+    "needs-input",
+    "review",
+    "complete",
+    "failed",
+    "cancelled",
+  ]),
   "needs-input": new Set(["needs-input", "running", "ready", "failed", "cancelled"]),
-  review: new Set(["review", "ready", "complete", "cancelled"]),
+  review: new Set(["review", "ready", "complete", "failed", "cancelled"]),
   complete: new Set(["complete", "ready"]),
   failed: new Set(["failed", "ready", "cancelled"]),
   cancelled: new Set(["cancelled", "ready"]),
@@ -61,6 +69,9 @@ function automationDependenciesAreValid(input: {
     );
     if (!dependency || dependency.projectId !== input.projectId) {
       return `Dependency '${dependencyId}' is not an active task in this project.`;
+    }
+    if (!dependency.automation) {
+      return `Dependency '${dependencyId}' is not configured for automation.`;
     }
   }
 

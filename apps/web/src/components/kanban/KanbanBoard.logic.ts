@@ -3,6 +3,14 @@ import type {
   EnvironmentThread,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import type { OrchestrationAutomationDeliveryMode } from "@t3tools/contracts";
+
+export { AUTOMATION_PLAN_EFFORTS, parseAutomationPlan } from "@t3tools/shared/automationPlan";
+export type {
+  AutomationPlan,
+  AutomationPlanEffort,
+  AutomationPlanTask,
+} from "@t3tools/shared/automationPlan";
 
 export const KANBAN_ACTIVE_LANES = ["queue", "running", "attention", "review", "complete"] as const;
 
@@ -14,105 +22,31 @@ export interface KanbanLaneGroup {
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
 }
 
-export const AUTOMATION_PLAN_EFFORTS = ["low", "medium", "high", "xhigh", "max", "ultra"] as const;
-export type AutomationPlanEffort = (typeof AUTOMATION_PLAN_EFFORTS)[number];
-
-export interface AutomationPlanTask {
-  readonly key: string;
-  readonly title: string;
-  readonly goal: string;
-  readonly acceptanceCriteria: ReadonlyArray<string>;
-  readonly dependsOn: ReadonlyArray<string>;
-  readonly changeScopes: ReadonlyArray<string>;
-  readonly model: string;
-  readonly reasoningEffort: AutomationPlanEffort;
-  readonly verification: ReadonlyArray<string>;
+export function isAutomaticWorkflowCoordinator(
+  automation: EnvironmentThreadShell["automation"],
+): boolean {
+  return Boolean(
+    automation?.stage === "review" &&
+    automation.taskKind === "planning" &&
+    automation.workflowConfig?.mode === "automatic",
+  );
 }
 
-export interface AutomationPlan {
-  readonly summary: string;
-  readonly tasks: ReadonlyArray<AutomationPlanTask>;
-}
-
-function stringArray(value: unknown, maximum: number): ReadonlyArray<string> | null {
-  if (!Array.isArray(value) || value.length > maximum) return null;
-  const values = value
-    .filter((item): item is string => typeof item === "string")
-    .map((item) => item.trim());
-  return values.length === value.length && values.every(Boolean) ? values : null;
-}
-
-export function parseAutomationPlan(text: string): AutomationPlan | null {
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text)?.[1];
-  const candidate = fenced ?? text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-  if (!candidate.trim()) return null;
-  let decoded: unknown;
-  try {
-    decoded = JSON.parse(candidate);
-  } catch {
-    return null;
-  }
-  if (typeof decoded !== "object" || decoded === null) return null;
-  const record = decoded as Record<string, unknown>;
-  if (typeof record.summary !== "string" || !Array.isArray(record.tasks)) return null;
-  if (record.tasks.length === 0 || record.tasks.length > 8) return null;
-  const tasks: AutomationPlanTask[] = [];
-  for (const value of record.tasks) {
-    if (typeof value !== "object" || value === null) return null;
-    const task = value as Record<string, unknown>;
-    const acceptanceCriteria = stringArray(task.acceptanceCriteria, 24);
-    const dependsOn = stringArray(task.dependsOn, 16);
-    const changeScopes = stringArray(task.changeScopes, 32);
-    const verification = stringArray(task.verification, 16);
-    if (
-      typeof task.key !== "string" ||
-      typeof task.title !== "string" ||
-      typeof task.goal !== "string" ||
-      typeof task.model !== "string" ||
-      typeof task.reasoningEffort !== "string" ||
-      !AUTOMATION_PLAN_EFFORTS.includes(task.reasoningEffort as AutomationPlanEffort) ||
-      acceptanceCriteria === null ||
-      acceptanceCriteria.length === 0 ||
-      dependsOn === null ||
-      changeScopes === null ||
-      changeScopes.length === 0 ||
-      verification === null ||
-      verification.length === 0
-    ) {
-      return null;
-    }
-    tasks.push({
-      key: task.key.trim(),
-      title: task.title.trim(),
-      goal: task.goal.trim(),
-      acceptanceCriteria,
-      dependsOn,
-      changeScopes,
-      model: task.model.trim(),
-      reasoningEffort: task.reasoningEffort as AutomationPlanEffort,
-      verification,
-    });
-  }
-  if (tasks.some((task) => !task.key || !task.title || !task.goal || !task.model)) return null;
-  const keys = new Set(tasks.map((task) => task.key));
-  if (keys.size !== tasks.length) return null;
-  if (tasks.some((task) => task.dependsOn.some((key) => !keys.has(key) || key === task.key))) {
-    return null;
-  }
-  const visiting = new Set<string>();
-  const visited = new Set<string>();
-  const dependencies = new Map(tasks.map((task) => [task.key, task.dependsOn]));
-  const hasCycle = (key: string): boolean => {
-    if (visiting.has(key)) return true;
-    if (visited.has(key)) return false;
-    visiting.add(key);
-    if ((dependencies.get(key) ?? []).some(hasCycle)) return true;
-    visiting.delete(key);
-    visited.add(key);
-    return false;
-  };
-  if (tasks.some((task) => hasCycle(task.key))) return null;
-  return { summary: record.summary.trim(), tasks };
+export function isKanbanReviewDeliveryReady(input: {
+  readonly taskKind: "implementation" | "planning" | undefined;
+  readonly workflowIntegration: boolean;
+  readonly gitStatusAvailable: boolean;
+  readonly hasWorkingTreeChanges: boolean;
+  readonly deliveryMode: OrchestrationAutomationDeliveryMode;
+  readonly pullRequestOpen: boolean;
+  readonly aheadCount: number;
+}): boolean {
+  if (input.taskKind === "planning") return true;
+  if (!input.gitStatusAvailable || input.hasWorkingTreeChanges) return false;
+  if (input.workflowIntegration) return true;
+  if (input.deliveryMode === "pull-request") return input.pullRequestOpen;
+  if (input.deliveryMode === "push-branch") return input.aheadCount === 0;
+  return true;
 }
 
 export function liveKanbanAutomation(
@@ -152,6 +86,9 @@ export function classifyKanbanThread(thread: EnvironmentThreadShell, now: string
       case "failed":
         return "attention";
       case "review":
+        if (isAutomaticWorkflowCoordinator(thread.automation)) {
+          return "running";
+        }
         return "review";
       case "complete":
       case "cancelled":
@@ -227,6 +164,9 @@ export function describeKanbanThreadState(
       case "needs-input":
         return "Needs input";
       case "review":
+        if (isAutomaticWorkflowCoordinator(thread.automation)) {
+          return "Coordinating";
+        }
         return isKanbanThreadVerified(thread) ? "Verified · ready for review" : "Ready for review";
       case "complete":
         return "Complete";
@@ -346,7 +286,11 @@ export function incompleteAutomationDependencies(
   if (!thread.automation) return [];
   const completeIds = new Set(
     threads
-      .filter((candidate) => candidate.automation?.stage === "complete")
+      .filter(
+        (candidate) =>
+          candidate.automation?.stage === "complete" ||
+          isAutomaticWorkflowCoordinator(candidate.automation),
+      )
       .map((candidate) => candidate.id),
   );
   const byId = new Map(threads.map((candidate) => [candidate.id, candidate]));

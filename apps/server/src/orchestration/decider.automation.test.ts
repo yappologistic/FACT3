@@ -23,6 +23,9 @@ const threadB = ThreadId.make("automation-b");
 
 const automation = (dependencies: ReadonlyArray<ThreadId> = []): OrchestrationThreadAutomation => ({
   taskKind: "implementation",
+  workflowId: null,
+  workflowTaskKey: null,
+  role: "worker",
   goal: "Implement the autonomous task",
   acceptanceCriteria: ["Focused tests pass"],
   dependencies,
@@ -37,7 +40,7 @@ const automation = (dependencies: ReadonlyArray<ThreadId> = []): OrchestrationTh
   lastHeartbeatAt: null,
   lastError: null,
   feedback: null,
-  verification: { status: "pending", summary: null, completedAt: null },
+  verification: { status: "pending", summary: null, evidence: [], completedAt: null },
   startedAt: null,
   completedAt: null,
   createdAt: NOW,
@@ -159,6 +162,17 @@ it.layer(NodeServices.layer)("automation decider", (it) => {
       );
       expect(singleEvent(policyEvent).type).toBe("project.automation-configured");
 
+      const configuredA = yield* decide(
+        {
+          type: "thread.automation.configure",
+          commandId: CommandId.make("configure-prerequisite"),
+          threadId: threadA,
+          automation: automation(),
+          updatedAt: NOW,
+        },
+        model,
+      );
+      const withConfiguredA = yield* projectEvent(model, sequenced(configuredA, 4));
       const configured = yield* decide(
         {
           type: "thread.automation.configure",
@@ -167,7 +181,7 @@ it.layer(NodeServices.layer)("automation decider", (it) => {
           automation: automation([threadA]),
           updatedAt: NOW,
         },
-        model,
+        withConfiguredA,
       );
       const configuredSingle = singleEvent(configured);
       expect(configuredSingle.type).toBe("thread.automation-configured");
@@ -194,6 +208,17 @@ it.layer(NodeServices.layer)("automation decider", (it) => {
       );
       expect(selfError.message).toContain("cannot depend on itself");
 
+      const configureB = yield* decide(
+        {
+          type: "thread.automation.configure",
+          commandId: CommandId.make("configure-b"),
+          threadId: threadB,
+          automation: automation(),
+          updatedAt: NOW,
+        },
+        model,
+      );
+      const withB = yield* projectEvent(model, sequenced(configureB, 4));
       const configureA = yield* decide(
         {
           type: "thread.automation.configure",
@@ -202,9 +227,9 @@ it.layer(NodeServices.layer)("automation decider", (it) => {
           automation: automation([threadB]),
           updatedAt: NOW,
         },
-        model,
+        withB,
       );
-      const withA = yield* projectEvent(model, sequenced(configureA, 4));
+      const withA = yield* projectEvent(withB, sequenced(configureA, 5));
       const cycleError = yield* Effect.flip(
         decide(
           {
@@ -218,6 +243,25 @@ it.layer(NodeServices.layer)("automation decider", (it) => {
         ),
       );
       expect(cycleError.message).toContain("cannot contain a cycle");
+    }),
+  );
+
+  it.effect("rejects dependencies that are not autonomous tasks", () =>
+    Effect.gen(function* () {
+      const model = yield* seed;
+      const error = yield* Effect.flip(
+        decide(
+          {
+            type: "thread.automation.configure",
+            commandId: CommandId.make("non-automation-dependency"),
+            threadId: threadB,
+            automation: automation([threadA]),
+            updatedAt: NOW,
+          },
+          model,
+        ),
+      );
+      expect(error.message).toContain("not configured for automation");
     }),
   );
 
@@ -305,6 +349,48 @@ it.layer(NodeServices.layer)("automation decider", (it) => {
         configured,
       );
       expect(singleEvent(running).type).toBe("thread.automation-transitioned");
+
+      const runningModel = yield* projectEvent(configured, sequenced(running, 5));
+      const retry = yield* decide(
+        {
+          type: "thread.automation.transition",
+          commandId: CommandId.make("retry-transition"),
+          threadId: threadA,
+          expectedStage: "running",
+          stage: "ready",
+          phase: "implementation",
+          lastError: "Provider process exited unexpectedly",
+          updatedAt: NOW,
+        },
+        runningModel,
+      );
+      expect(singleEvent(retry).type).toBe("thread.automation-transitioned");
+
+      const review = yield* decide(
+        {
+          type: "thread.automation.transition",
+          commandId: CommandId.make("review-transition"),
+          threadId: threadA,
+          expectedStage: "running",
+          stage: "review",
+          updatedAt: NOW,
+        },
+        runningModel,
+      );
+      const reviewModel = yield* projectEvent(runningModel, sequenced(review, 6));
+      const failedCoordination = yield* decide(
+        {
+          type: "thread.automation.transition",
+          commandId: CommandId.make("coordination-failed-transition"),
+          threadId: threadA,
+          expectedStage: "review",
+          stage: "failed",
+          lastError: "Integration failed",
+          updatedAt: NOW,
+        },
+        reviewModel,
+      );
+      expect(singleEvent(failedCoordination).type).toBe("thread.automation-transitioned");
     }),
   );
 });

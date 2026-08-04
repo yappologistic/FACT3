@@ -5,6 +5,7 @@ import type {
 } from "@t3tools/client-runtime/state/shell";
 import type {
   ModelSelection,
+  OrchestrationAutomationRole,
   OrchestrationAutomationStage,
   ServerProvider,
 } from "@t3tools/contracts";
@@ -29,7 +30,7 @@ import {
   RotateCcwIcon,
   Settings2Icon,
   ShieldCheckIcon,
-  SparklesIcon,
+  WorkflowIcon,
   XCircleIcon,
   XIcon,
 } from "lucide-react";
@@ -84,7 +85,9 @@ import {
   firstUserGoal,
   groupKanbanThreads,
   incompleteAutomationDependencies,
+  isAutomaticWorkflowCoordinator,
   isKanbanThreadVerified,
+  isKanbanReviewDeliveryReady,
   liveKanbanAutomation,
   parseAutomationPlan,
   presentKanbanAutomationError,
@@ -134,11 +137,42 @@ function compactModelLabel(model: string): string {
     });
 }
 
+const AUTOMATION_ROLE_LABELS: Record<OrchestrationAutomationRole, string> = {
+  orchestrator: "Orchestrator",
+  planner: "Planner",
+  worker: "Worker",
+  verifier: "Verifier",
+  integrator: "Integrator",
+  visual: "Visual specialist",
+};
+
+function workflowRoleLabel(thread: EnvironmentThreadShell): string | null {
+  return thread.automation?.workflowId ? AUTOMATION_ROLE_LABELS[thread.automation.role] : null;
+}
+
+function resolveConfiguredModelSelection(
+  selection: ModelSelection,
+  providers: ReadonlyArray<ServerProvider>,
+): ModelSelection | null {
+  const provider = providers.find(
+    (candidate) =>
+      candidate.instanceId === selection.instanceId &&
+      candidate.enabled &&
+      candidate.installed &&
+      candidate.availability !== "unavailable" &&
+      candidate.models.some((model) => model.slug === selection.model),
+  );
+  return provider ? selection : null;
+}
+
 function resolvePlanModelSelection(
   task: AutomationPlanTask,
   providers: ReadonlyArray<ServerProvider>,
   fallback: ModelSelection,
 ): ModelSelection | null {
+  if (!task.model || !task.reasoningEffort) {
+    return resolveConfiguredModelSelection(fallback, providers);
+  }
   const provider = providers.find(
     (candidate) =>
       candidate.enabled &&
@@ -217,6 +251,7 @@ const KanbanCard = memo(function KanbanCard(props: {
 }) {
   const stateLabel = stateLabelForThread(props.thread, props.allThreads);
   const subagentCount = props.thread.subagentCount ?? 0;
+  const roleLabel = workflowRoleLabel(props.thread);
   const quietStateLabel =
     props.lane === "history"
       ? props.thread.archivedAt
@@ -255,7 +290,7 @@ const KanbanCard = memo(function KanbanCard(props: {
           )}
         >
           {props.thread.automation?.taskKind === "planning" ? (
-            <SparklesIcon aria-hidden className="size-3.5" />
+            <WorkflowIcon aria-hidden className="size-3.5" />
           ) : (
             <ListTodoIcon aria-hidden className="size-3.5" />
           )}
@@ -283,13 +318,19 @@ const KanbanCard = memo(function KanbanCard(props: {
         </span>
         {subagentCount > 0 ? (
           <span
-            aria-label={`${subagentCount} sub-agent${subagentCount === 1 ? "" : "s"} used by this task`}
-            className="flex shrink-0 items-center rounded-full border border-foreground/[0.08] bg-foreground/[0.03] px-1.5 py-0.5"
+            aria-label={`${roleLabel ? `${roleLabel}. ` : ""}${subagentCount} sub-agent${subagentCount === 1 ? "" : "s"} used by this task`}
+            className="flex max-w-[48%] shrink-0 items-center gap-1 rounded-full border border-foreground/[0.08] bg-foreground/[0.03] px-1.5 py-0.5"
           >
+            {roleLabel ? (
+              <span className="truncate pl-0.5 text-[10px] text-muted-foreground/72">
+                {roleLabel}
+              </span>
+            ) : null}
             <SubagentAvatarStack animated={props.lane === "running"} count={subagentCount} />
           </span>
         ) : (
           <span className="max-w-[46%] truncate rounded-full border border-foreground/[0.07] bg-foreground/[0.035] px-2 py-0.5 text-[11px] text-muted-foreground/80">
+            {roleLabel ? `${roleLabel} · ` : ""}
             {compactModelLabel(props.thread.modelSelection.model)}
           </span>
         )}
@@ -655,16 +696,34 @@ function KanbanInspector(props: {
     const proposedPlan = thread.proposedPlans.toReversed().find((plan) => !plan.implementedAt);
     return parseAutomationPlan(assistant?.text ?? proposedPlan?.planMarkdown ?? "");
   }, [automation?.taskKind, thread]);
+  const workflowConfig = automation?.workflowConfig ?? null;
   const proposedModelSelections = useMemo(
     () =>
-      proposedExecution?.tasks.map((task) =>
-        resolvePlanModelSelection(
-          task,
-          serverConfig?.providers ?? [],
-          props.threadShell.modelSelection,
-        ),
-      ) ?? [],
-    [proposedExecution, props.threadShell.modelSelection, serverConfig?.providers],
+      proposedExecution?.tasks.map((task) => {
+        const configuredSelection = workflowConfig
+          ? task.role === "visual"
+            ? workflowConfig.roles.visual
+            : workflowConfig.roles.worker
+          : null;
+        return configuredSelection
+          ? resolveConfiguredModelSelection(configuredSelection, serverConfig?.providers ?? [])
+          : resolvePlanModelSelection(
+              task,
+              serverConfig?.providers ?? [],
+              props.threadShell.modelSelection,
+            );
+      }) ?? [],
+    [proposedExecution, props.threadShell.modelSelection, serverConfig?.providers, workflowConfig],
+  );
+  const proposedIntegratorModelSelection = useMemo(
+    () =>
+      workflowConfig
+        ? resolveConfiguredModelSelection(
+            workflowConfig.roles.integrator,
+            serverConfig?.providers ?? [],
+          )
+        : null,
+    [serverConfig?.providers, workflowConfig],
   );
   const gitCwd = thread?.worktreePath ?? props.threadShell.worktreePath;
   const gitStatus = useEnvironmentQuery(
@@ -826,11 +885,51 @@ function KanbanInspector(props: {
       automation.taskKind !== "planning" ||
       automation.stage !== "review" ||
       !proposedExecution ||
-      proposedModelSelections.some((selection) => selection === null)
+      proposedModelSelections.some((selection) => selection === null) ||
+      (workflowConfig !== null && proposedIntegratorModelSelection === null)
     ) {
       return;
     }
     setLifecyclePending(true);
+    if (workflowConfig !== null) {
+      const completedAt = new Date().toISOString();
+      const transitionResult = await transitionAutomation({
+        environmentId: props.threadShell.environmentId,
+        input: {
+          threadId: props.threadShell.id,
+          expectedStage: "review",
+          stage: "complete",
+          completedAt,
+        },
+      });
+      if (transitionResult._tag === "Failure") {
+        setLifecyclePending(false);
+        showLifecycleError();
+        return;
+      }
+      const enableResult = policy.enabled
+        ? null
+        : await configureProjectAutomation({
+            environmentId: props.threadShell.environmentId,
+            input: {
+              projectId: props.project.id,
+              policy: { ...policy, enabled: true },
+            },
+          });
+      setLifecyclePending(false);
+      toastManager.add({
+        type: enableResult?._tag === "Failure" ? "warning" : "success",
+        title:
+          enableResult?._tag === "Failure"
+            ? "Plan approved; Autopilot is still paused"
+            : "Plan approved",
+        description:
+          enableResult?._tag === "Failure"
+            ? "FACT3 is materializing the audited plan. Start Autopilot when you are ready."
+            : "FACT3 is materializing the audited plan and will start dependency-safe work automatically.",
+      });
+      return;
+    }
     const restorePolicy = async () => {
       if (!policy.enabled) return;
       await configureProjectAutomation({
@@ -897,6 +996,9 @@ function KanbanInspector(props: {
           threadId,
           automation: {
             taskKind: "implementation",
+            workflowId: props.threadShell.id,
+            workflowTaskKey: task.key,
+            role: task.role,
             goal: task.goal,
             acceptanceCriteria: [
               ...task.acceptanceCriteria,
@@ -914,7 +1016,12 @@ function KanbanInspector(props: {
             lastHeartbeatAt: null,
             lastError: null,
             feedback: null,
-            verification: { status: "pending", summary: null, completedAt: null },
+            verification: {
+              status: "pending",
+              summary: null,
+              evidence: [],
+              completedAt: null,
+            },
             startedAt: null,
             completedAt: null,
             createdAt,
@@ -963,7 +1070,7 @@ function KanbanInspector(props: {
     toastManager.add({
       type: "success",
       title: "Plan approved",
-      description: `${proposedExecution.tasks.length} autonomous tasks are ready to run.`,
+      description: `${createdIds.length} autonomous tasks are ready to run.`,
     });
   }, [
     automation,
@@ -973,19 +1080,27 @@ function KanbanInspector(props: {
     deleteThread,
     policy,
     proposedExecution,
+    proposedIntegratorModelSelection,
     proposedModelSelections,
     props.project.id,
     props.threadShell.environmentId,
     props.threadShell.id,
     transitionAutomation,
+    workflowConfig,
   ]);
 
-  const reviewDeliveryReady =
-    automation?.taskKind === "planning" ||
-    (gitStatus.data != null &&
-      !gitStatus.data.hasWorkingTreeChanges &&
-      (policy.deliveryMode !== "pull-request" || gitStatus.data.pr?.state === "open") &&
-      (policy.deliveryMode !== "push-branch" || !gitStatus.data.aheadCount));
+  const workflowIntegrationReview =
+    automation?.workflowId !== null && automation?.role === "integrator";
+  const automaticWorkflowCoordinator = isAutomaticWorkflowCoordinator(automation);
+  const reviewDeliveryReady = isKanbanReviewDeliveryReady({
+    taskKind: automation?.taskKind,
+    workflowIntegration: workflowIntegrationReview,
+    gitStatusAvailable: gitStatus.data != null,
+    hasWorkingTreeChanges: gitStatus.data?.hasWorkingTreeChanges ?? false,
+    deliveryMode: policy.deliveryMode,
+    pullRequestOpen: gitStatus.data?.pr?.state === "open",
+    aheadCount: gitStatus.data?.aheadCount ?? 0,
+  });
   const reviewNeedsDelivery = automation?.stage === "review" && !reviewDeliveryReady;
 
   const primaryAction = automation
@@ -997,15 +1112,19 @@ function KanbanInspector(props: {
             Icon: MessageSquareTextIcon,
             run: async () => props.onOpenThread(props.threadShell),
           }
-        : automation.stage === "review" && automation.taskKind === "planning"
-          ? proposedExecution && proposedModelSelections.every((selection) => selection !== null)
+        : automation.stage === "review" &&
+            automation.taskKind === "planning" &&
+            workflowConfig?.mode !== "automatic"
+          ? proposedExecution &&
+            proposedModelSelections.every((selection) => selection !== null) &&
+            (workflowConfig === null || proposedIntegratorModelSelection !== null)
             ? {
                 label: "Approve plan & start",
-                Icon: SparklesIcon,
+                Icon: WorkflowIcon,
                 run: approveProposedExecution,
               }
             : null
-          : automation.stage === "review" && reviewDeliveryReady
+          : automation.stage === "review" && reviewDeliveryReady && !automaticWorkflowCoordinator
             ? {
                 label: "Approve task",
                 Icon: CheckCircle2Icon,
@@ -1032,6 +1151,7 @@ function KanbanInspector(props: {
                         verification: {
                           status: "pending",
                           summary: null,
+                          evidence: [],
                           completedAt: null,
                         },
                       }),
@@ -1063,6 +1183,11 @@ function KanbanInspector(props: {
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-1.5">
+                  {workflowRoleLabel(props.threadShell) ? (
+                    <span className="rounded-full border border-foreground/[0.07] bg-foreground/[0.035] px-2 py-1 text-[11px] text-foreground/72">
+                      {workflowRoleLabel(props.threadShell)}
+                    </span>
+                  ) : null}
                   <span className="rounded-full border border-foreground/[0.07] bg-foreground/[0.035] px-2 py-1 text-[11px] text-muted-foreground">
                     {compactModelLabel(props.threadShell.modelSelection.model)}
                   </span>
@@ -1118,7 +1243,7 @@ function KanbanInspector(props: {
                   </h3>
                   {proposedExecution ? (
                     <span className="text-[11px] tabular-nums text-muted-foreground">
-                      {proposedExecution.tasks.length} tasks
+                      {proposedExecution.tasks.length + (workflowConfig ? 1 : 0)} tasks
                     </span>
                   ) : null}
                 </div>
@@ -1129,7 +1254,8 @@ function KanbanInspector(props: {
                     </p>
                     <ol className="mt-3 space-y-2">
                       {proposedExecution.tasks.map((task, index) => {
-                        const modelAvailable = proposedModelSelections[index] !== null;
+                        const selection = proposedModelSelections[index];
+                        const modelAvailable = selection !== null;
                         return (
                           <li
                             key={task.key}
@@ -1152,7 +1278,10 @@ function KanbanInspector(props: {
                                         : "border-destructive/20 bg-destructive/[0.04] text-destructive",
                                     )}
                                   >
-                                    {compactModelLabel(task.model)} · {task.reasoningEffort}
+                                    {AUTOMATION_ROLE_LABELS[task.role]} ·{" "}
+                                    {compactModelLabel(
+                                      selection?.model ?? task.model ?? "Unavailable",
+                                    )}
                                   </span>
                                   {task.dependsOn.length > 0 ? (
                                     <span>after {task.dependsOn.join(", ")}</span>
@@ -1168,11 +1297,47 @@ function KanbanInspector(props: {
                           </li>
                         );
                       })}
+                      {workflowConfig ? (
+                        <li className="rounded-[14px] border border-foreground/[0.065] bg-foreground/[0.02] px-3 py-2.5">
+                          <div className="flex items-start gap-2.5">
+                            <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground/[0.055] text-[11px] tabular-nums text-muted-foreground">
+                              {proposedExecution.tasks.length + 1}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-[12px] font-medium leading-4 text-foreground/84">
+                                Integrate autonomous workflow
+                              </p>
+                              <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground/68">
+                                <span
+                                  className={cn(
+                                    "rounded-full border px-1.5 py-0.5",
+                                    proposedIntegratorModelSelection
+                                      ? "border-foreground/[0.07] bg-foreground/[0.03]"
+                                      : "border-destructive/20 bg-destructive/[0.04] text-destructive",
+                                  )}
+                                >
+                                  Integrator ·{" "}
+                                  {compactModelLabel(
+                                    proposedIntegratorModelSelection?.model ??
+                                      workflowConfig.roles.integrator.model,
+                                  )}
+                                </span>
+                                <span>after every planned task</span>
+                              </div>
+                              <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground/55">
+                                Resolves conflicts and verifies the combined result on the base
+                                branch.
+                              </p>
+                            </div>
+                          </div>
+                        </li>
+                      ) : null}
                     </ol>
-                    {proposedModelSelections.some((selection) => selection === null) ? (
+                    {proposedModelSelections.some((selection) => selection === null) ||
+                    (workflowConfig !== null && proposedIntegratorModelSelection === null) ? (
                       <p className="mt-2.5 rounded-[12px] border border-destructive/15 bg-destructive/[0.035] px-3 py-2 text-[11px] leading-4 text-destructive">
-                        One or more proposed models are unavailable in this environment. Open the
-                        planning response and ask the agent to use an installed model.
+                        A configured role model is no longer available in this environment. Open
+                        chat to revise the workflow or start a new one with an enabled model.
                       </p>
                     ) : null}
                   </>
@@ -1199,6 +1364,14 @@ function KanbanInspector(props: {
                   <dd className="text-foreground/82">
                     {stateLabelForThread(props.threadShell, props.allThreads)}
                   </dd>
+                  {automation.workflowId ? (
+                    <>
+                      <dt className="text-muted-foreground/60">Role</dt>
+                      <dd className="text-foreground/82">
+                        {AUTOMATION_ROLE_LABELS[automation.role]}
+                      </dd>
+                    </>
+                  ) : null}
                   <dt className="text-muted-foreground/60">Attempt</dt>
                   <dd className="text-foreground/82">
                     {automation.attempt} of {automation.maxAttempts}
@@ -1271,6 +1444,29 @@ function KanbanInspector(props: {
                   <p className="mt-3 text-[12px] leading-4 text-muted-foreground/72">
                     {automation.verification.summary}
                   </p>
+                ) : null}
+                {!automationError && automation.verification.evidence.length > 0 ? (
+                  <div className="mt-3 rounded-[14px] border border-foreground/[0.065] bg-foreground/[0.018] px-3 py-2.5">
+                    <p className="text-[11px] font-medium text-foreground/76">
+                      Verification evidence
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {automation.verification.evidence.slice(0, 4).map((evidence) => (
+                        <li
+                          key={`${evidence.check}:${evidence.detail}`}
+                          className="text-[11px] leading-4"
+                        >
+                          <p className="font-medium text-foreground/76">{evidence.check}</p>
+                          <p className="mt-0.5 text-muted-foreground/65">{evidence.detail}</p>
+                        </li>
+                      ))}
+                    </ul>
+                    {automation.verification.evidence.length > 4 ? (
+                      <p className="mt-2 text-[10px] text-muted-foreground/55">
+                        +{automation.verification.evidence.length - 4} more checks in chat
+                      </p>
+                    ) : null}
+                  </div>
                 ) : null}
               </section>
             ) : null}
@@ -1478,7 +1674,7 @@ function KanbanInspector(props: {
             Open chat
           </Button>
 
-          {automation?.stage === "review" ? (
+          {automation?.stage === "review" && !automaticWorkflowCoordinator ? (
             <Button
               variant="outline"
               size="sm"
@@ -1566,7 +1762,12 @@ function KanbanInspector(props: {
             feedback,
             completedAt: null,
             lastError: null,
-            verification: { status: "pending", summary: null, completedAt: null },
+            verification: {
+              status: "pending",
+              summary: null,
+              evidence: [],
+              completedAt: null,
+            },
           }).then((succeeded) => {
             if (succeeded) setRequestChangesOpen(false);
           });
@@ -1653,7 +1854,7 @@ function HistoryBoard(props: {
 function AutomationControlBar(props: {
   readonly project: EnvironmentProject;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
-  readonly onOpenGoal: () => void;
+  readonly onOpenWorkflow: () => void;
   readonly onOpenSettings: () => void;
 }) {
   const configureAutomation = useAtomCommand(projectEnvironment.configureAutomation, {
@@ -1706,10 +1907,10 @@ function AutomationControlBar(props: {
         <WorkspaceToolbarActionButton
           emphasized
           className="text-[12px] sm:h-7 sm:text-[12px]"
-          onClick={props.onOpenGoal}
+          onClick={props.onOpenWorkflow}
         >
-          <SparklesIcon aria-hidden className="size-3.5" />
-          Plan project
+          <WorkflowIcon aria-hidden className="size-3.5" />
+          Autonomous workflow
         </WorkspaceToolbarActionButton>
         <WorkspaceToolbarActionButton
           className="text-[12px] sm:h-7 sm:text-[12px]"
@@ -1780,7 +1981,7 @@ export function KanbanBoard(props: {
   );
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [goalOpen, setGoalOpen] = useState(false);
+  const [workflowOpen, setWorkflowOpen] = useState(false);
   const boardIsEmpty = visibleLanes.every((lane) => lane.threads.length === 0);
   const selectedThread = selectedKey
     ? (visibleThreads.find((thread) => kanbanThreadKey(thread) === selectedKey) ?? null)
@@ -1804,7 +2005,7 @@ export function KanbanBoard(props: {
           <AutomationControlBar
             project={props.project}
             threads={props.threads}
-            onOpenGoal={() => setGoalOpen(true)}
+            onOpenWorkflow={() => setWorkflowOpen(true)}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         ) : null}
@@ -1827,12 +2028,13 @@ export function KanbanBoard(props: {
                 No autonomous work yet
               </h2>
               <p className="mx-auto mt-2 max-w-sm text-[12px] leading-5 text-muted-foreground/70">
-                Plan a project goal for FACT3 to break down, or add one focused task yourself.
+                Start an autonomous workflow for FACT3 to plan and coordinate, or add one focused
+                task yourself.
               </p>
               <div className="mt-5 flex items-center justify-center gap-2">
-                <Button size="sm" onClick={() => setGoalOpen(true)}>
-                  <SparklesIcon aria-hidden className="size-3.5" />
-                  Plan project
+                <Button size="sm" onClick={() => setWorkflowOpen(true)}>
+                  <WorkflowIcon aria-hidden className="size-3.5" />
+                  Autonomous workflow
                 </Button>
                 <Button variant="outline" size="sm" onClick={() => props.onNewTaskOpenChange(true)}>
                   <ListTodoIcon aria-hidden className="size-3.5" />
@@ -1886,8 +2088,8 @@ export function KanbanBoard(props: {
       />
       <KanbanProjectGoalDialog
         key={`goal:${props.project.environmentId}:${props.project.id}:${props.baseBranch}`}
-        open={goalOpen}
-        onOpenChange={setGoalOpen}
+        open={workflowOpen}
+        onOpenChange={setWorkflowOpen}
         project={props.project}
         baseBranch={props.baseBranch}
         modelSelection={props.modelSelection}

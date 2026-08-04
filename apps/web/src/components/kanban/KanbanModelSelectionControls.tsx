@@ -1,6 +1,6 @@
 import type { ModelSelection, ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
 import type { UnifiedSettings } from "@t3tools/contracts/settings";
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 
 import { getComposerProviderState } from "~/components/chat/composerProviderState";
 import { ProviderModelPicker } from "~/components/chat/ProviderModelPicker";
@@ -28,7 +28,11 @@ export function KanbanModelSelectionControls(props: {
   readonly settings: UnifiedSettings;
   readonly value: ModelSelection | null;
   readonly onChange: (selection: ModelSelection | null) => void;
+  readonly label?: string;
+  readonly helpText?: string;
+  readonly triggerAriaLabel?: string;
 }) {
+  const labelId = useId();
   const entries = useMemo(
     () =>
       sortProviderInstanceEntries(
@@ -79,8 +83,10 @@ export function KanbanModelSelectionControls(props: {
   };
 
   return (
-    <div>
-      <p className="mb-1.5 text-[12px] font-medium leading-4 text-foreground/78">Agent runtime</p>
+    <div role="group" aria-labelledby={labelId}>
+      <p id={labelId} className="mb-1.5 text-[12px] font-medium leading-4 text-foreground/78">
+        {props.label ?? "Agent runtime"}
+      </p>
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] p-1.5">
         <ProviderModelPicker
           activeInstanceId={value.instanceId}
@@ -89,7 +95,7 @@ export function KanbanModelSelectionControls(props: {
           instanceEntries={entries}
           modelOptionsByInstance={modelOptionsByInstance}
           triggerVariant="outline"
-          triggerAriaLabel="Choose provider and model"
+          triggerAriaLabel={props.triggerAriaLabel ?? "Choose provider and model"}
           triggerClassName="h-8 max-w-[18rem] flex-1 justify-between px-2.5 text-[12px] sm:max-w-[22rem]"
           onInstanceModelChange={selectModel}
         />
@@ -114,7 +120,8 @@ export function KanbanModelSelectionControls(props: {
         />
       </div>
       <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/60">
-        The selected provider, model, reasoning level, and speed settings apply to this task only.
+        {props.helpText ??
+          "The selected provider, model, reasoning level, and speed settings apply to this task only."}
       </p>
     </div>
   );
