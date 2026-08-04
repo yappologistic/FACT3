@@ -20,7 +20,7 @@ import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useT3ProjectFileScripts } from "~/hooks/useT3ProjectFileScripts";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { cn } from "~/lib/utils";
-import { Button } from "../ui/button";
+import { WorkspaceToolbarActionButton } from "../WorkspaceToolbarActionButton";
 
 export type WorkspaceView = "chat" | "board";
 
@@ -193,35 +193,33 @@ export const ChatHeader = memo(function ChatHeader({
       <div
         data-chat-header-actions
         className={cn(
-          "flex min-w-0 shrink-0 items-center justify-self-end gap-2 @3xl/header-actions:gap-3",
+          "flex min-w-0 shrink-0 items-center justify-self-end",
+          workspaceView === "board" ? "gap-1.5" : "gap-2 @3xl/header-actions:gap-3",
           rightPanelOpen ? "pr-0" : "pr-16",
         )}
       >
         {workspaceView === "board" && activeProjectName ? (
           <>
-            <Button
+            <WorkspaceToolbarActionButton
               type="button"
-              variant="outline"
-              size="xs"
+              emphasized
               className="[-webkit-app-region:no-drag]"
               onClick={onNewTask}
             >
               <ListPlusIcon aria-hidden className="size-3.5" />
               <span className="hidden @3xl/header-actions:inline">New task</span>
-            </Button>
-            <Button
+            </WorkspaceToolbarActionButton>
+            <WorkspaceToolbarActionButton
               type="button"
-              variant={kanbanHistoryOpen ? "secondary" : "outline"}
-              size="xs"
+              selected={kanbanHistoryOpen}
               className="[-webkit-app-region:no-drag]"
-              aria-pressed={kanbanHistoryOpen}
               onClick={() => onKanbanHistoryOpenChange(!kanbanHistoryOpen)}
             >
               <HistoryIcon aria-hidden className="size-3.5" />
               <span className="hidden @3xl/header-actions:inline">
                 {kanbanHistoryOpen ? "Active board" : "History"}
               </span>
-            </Button>
+            </WorkspaceToolbarActionButton>
           </>
         ) : (
           <>

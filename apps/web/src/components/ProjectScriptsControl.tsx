@@ -70,6 +70,7 @@ import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
 import { Switch } from "./ui/switch";
 import { Textarea } from "./ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { WorkspaceToolbarActionButton } from "./WorkspaceToolbarActionButton";
 
 const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
   { id: "play", label: "Play" },
@@ -338,9 +339,8 @@ export default function ProjectScriptsControl({
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button
-                  size="xs"
-                  variant="outline"
+                <WorkspaceToolbarActionButton
+                  emphasized
                   aria-label={`Run ${primaryScript.name}`}
                   onClick={() => onRunScript(primaryScript)}
                 />
@@ -360,7 +360,7 @@ export default function ProjectScriptsControl({
             onOpenChange={(open) => setActionsMenuOpen({ scripts: open, imports: false })}
           >
             <MenuTrigger
-              render={<Button size="icon-xs" variant="outline" aria-label="Script actions" />}
+              render={<WorkspaceToolbarActionButton iconOnly aria-label="Script actions" />}
             >
               <ChevronDownIcon className="size-4" />
             </MenuTrigger>
@@ -422,7 +422,7 @@ export default function ProjectScriptsControl({
           open={actionsMenuOpen.imports}
           onOpenChange={(open) => setActionsMenuOpen({ scripts: false, imports: open })}
         >
-          <MenuTrigger render={<Button size="xs" variant="outline" aria-label="Project actions" />}>
+          <MenuTrigger render={<WorkspaceToolbarActionButton aria-label="Project actions" />}>
             <PlusIcon className="size-3.5" />
             <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
               Add action
@@ -441,7 +441,11 @@ export default function ProjectScriptsControl({
         <Tooltip>
           <TooltipTrigger
             render={
-              <Button size="xs" variant="outline" aria-label="Add action" onClick={openAddDialog} />
+              <WorkspaceToolbarActionButton
+                emphasized
+                aria-label="Add action"
+                onClick={openAddDialog}
+              />
             }
           >
             <PlusIcon className="size-3.5" />

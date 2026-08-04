@@ -90,6 +90,7 @@ import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { readLocalApi } from "~/localApi";
 import { getSourceControlPresentation } from "~/sourceControlPresentation";
 import { openPullRequestLink } from "~/lib/openPullRequestLink";
+import { WorkspaceToolbarActionButton } from "~/components/WorkspaceToolbarActionButton";
 
 interface GitActionsControlProps {
   gitCwd: string | null;
@@ -1661,9 +1662,8 @@ export default function GitActionsControl({
   return (
     <>
       {!isRepo ? (
-        <Button
-          variant="outline"
-          size="xs"
+        <WorkspaceToolbarActionButton
+          emphasized
           disabled={initAction.isPending}
           onClick={() => {
             void (async () => {
@@ -1687,7 +1687,7 @@ export default function GitActionsControl({
           <span className="ml-0.5">
             {initAction.isPending ? "Initializing..." : "Initialize Git"}
           </span>
-        </Button>
+        </WorkspaceToolbarActionButton>
       ) : (
         <Group aria-label="Git actions" className="shrink-0">
           {quickActionDisabledReason ? (
@@ -1695,11 +1695,9 @@ export default function GitActionsControl({
               <PopoverTrigger
                 openOnHover
                 render={
-                  <Button
+                  <WorkspaceToolbarActionButton
                     aria-disabled="true"
                     className="cursor-not-allowed rounded-e-none border-e-0 opacity-64 before:rounded-e-none"
-                    size="xs"
-                    variant="outline"
                   />
                 }
               >
@@ -1716,9 +1714,8 @@ export default function GitActionsControl({
               </PopoverPopup>
             </Popover>
           ) : (
-            <Button
-              variant="outline"
-              size="xs"
+            <WorkspaceToolbarActionButton
+              emphasized
               disabled={isGitActionRunning || quickAction.disabled}
               onClick={runQuickAction}
             >
@@ -1726,7 +1723,7 @@ export default function GitActionsControl({
               <span className="sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5">
                 {quickAction.label}
               </span>
-            </Button>
+            </WorkspaceToolbarActionButton>
           )}
           <GroupSeparator className="hidden @3xl/header-actions:block" />
           <Menu
@@ -1737,7 +1734,7 @@ export default function GitActionsControl({
             }}
           >
             <MenuTrigger
-              render={<Button aria-label="Git action options" size="icon-xs" variant="outline" />}
+              render={<WorkspaceToolbarActionButton iconOnly aria-label="Git action options" />}
               disabled={isGitActionRunning}
             >
               <ChevronDownIcon aria-hidden="true" className="size-4" />

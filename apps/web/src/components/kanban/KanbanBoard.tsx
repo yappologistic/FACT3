@@ -73,6 +73,7 @@ import {
   KanbanNewTaskDialog,
 } from "./KanbanAutomationDialogs";
 import { KanbanProjectGoalDialog } from "./KanbanProjectGoalDialog";
+import { WorkspaceToolbarActionButton } from "~/components/WorkspaceToolbarActionButton";
 import {
   automationConflictBlockers,
   capCompletedKanbanThreads,
@@ -1660,14 +1661,14 @@ function AutomationControlBar(props: {
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        <Button variant="outline" size="xs" onClick={props.onOpenGoal}>
+        <WorkspaceToolbarActionButton emphasized onClick={props.onOpenGoal}>
           <SparklesIcon aria-hidden className="size-3.5" />
           Plan project
-        </Button>
-        <Button variant="outline" size="xs" onClick={() => void toggle()} disabled={pending}>
+        </WorkspaceToolbarActionButton>
+        <WorkspaceToolbarActionButton onClick={() => void toggle()} disabled={pending}>
           {pending ? <OpenTuiSpinner name="dots" /> : policy.enabled ? <PauseIcon /> : <PlayIcon />}
           {policy.enabled ? "Pause" : "Start"}
-        </Button>
+        </WorkspaceToolbarActionButton>
         <Button
           variant="ghost"
           size="icon-xs"

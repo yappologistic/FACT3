@@ -4,7 +4,6 @@ import { onAppCommand } from "../../appCommandBus";
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
 import { usePreferredEditor } from "../../editorPreferences";
 import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
-import { Button } from "../ui/button";
 import { Group, GroupSeparator } from "../ui/group";
 import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
 import {
@@ -35,6 +34,7 @@ import {
 import { cn, isMacPlatform, isWindowsPlatform } from "~/lib/utils";
 import { shellEnvironment } from "~/state/shell";
 import { useAtomCommand } from "~/state/use-atom-command";
+import { WorkspaceToolbarActionButton } from "../WorkspaceToolbarActionButton";
 
 type OpenInOption = {
   label: string;
@@ -264,10 +264,9 @@ export const OpenInPicker = memo(function OpenInPicker({
 
   return (
     <Group aria-label="Open in editor">
-      <Button
+      <WorkspaceToolbarActionButton
         aria-label={compact ? "Open file in preferred editor" : undefined}
-        size="xs"
-        variant="outline"
+        emphasized
         disabled={!preferredEditor || !openInCwd}
         onClick={() => openInEditor(preferredEditor)}
       >
@@ -286,15 +285,14 @@ export const OpenInPicker = memo(function OpenInPicker({
         >
           Open
         </span>
-      </Button>
+      </WorkspaceToolbarActionButton>
       <GroupSeparator {...(!compact ? { className: "hidden @3xl/header-actions:block" } : {})} />
       <Menu>
         <MenuTrigger
           render={
-            <Button
+            <WorkspaceToolbarActionButton
+              iconOnly
               aria-label={compact ? "Choose editor" : "Copy options"}
-              size="icon-xs"
-              variant="outline"
             />
           }
         >
