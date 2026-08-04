@@ -29,6 +29,7 @@ import { AutomationReactor, type AutomationReactorShape } from "../Services/Auto
 import {
   automationAvailableSlots,
   automationDispatchCompletion,
+  automationFailureCanRetry,
   automationIsStalled,
   automationStuckDeadline,
   buildAutomationPrompt,
@@ -263,7 +264,7 @@ const make = Effect.gen(function* () {
   }) {
     const automation = input.thread.automation!;
     const attempt = input.attempt ?? automation.attempt;
-    if (attempt < automation.maxAttempts) {
+    if (automationFailureCanRetry(input.detail) && attempt < automation.maxAttempts) {
       yield* transition({
         thread: input.thread,
         stage: "ready",
@@ -473,12 +474,9 @@ const make = Effect.gen(function* () {
             createdAt: currentIso,
           });
         }
-        yield* transition({
+        yield* retryOrFail({
           thread,
-          stage: "failed",
-          leaseExpiresAt: null,
-          lastError: `No agent activity was recorded for ${policy.stuckAfterMinutes} minutes. The run was stopped so it could not block the board.`,
-          completedAt: currentIso,
+          detail: `No agent activity was recorded for ${policy.stuckAfterMinutes} minutes. The run was stopped so it could not block the board.`,
         });
         continue;
       }

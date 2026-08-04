@@ -515,6 +515,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  subagentCount: Schema.optional(NonNegativeInt),
   automation: Schema.optional(OrchestrationThreadAutomation),
 });
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type;

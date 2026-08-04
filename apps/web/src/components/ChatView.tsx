@@ -227,6 +227,7 @@ import { ChatComposer, type ChatComposerHandle } from "./chat/ChatComposer";
 import { ComposerActivityStatus } from "./chat/ComposerActivityStatus";
 import {
   deriveComposerActivityDetails,
+  deriveComposerActivityDetailsWithSubagentHistory,
   deriveLatestComposerActivityTurnId,
   deriveSubagentAssistantMessageIds,
 } from "./chat/composerActivityDetails";
@@ -2177,10 +2178,16 @@ function ChatViewContent(props: ChatViewProps) {
     () => deriveActivePlanState(threadActivities, activeActivityTurnId ?? undefined),
     [activeActivityTurnId, threadActivities],
   );
-  const composerActivityDetails = useMemo(
-    () => deriveComposerActivityDetails(threadActivities, activeActivityTurnId, activePlan),
-    [activeActivityTurnId, activePlan, threadActivities],
-  );
+  const composerActivityDetails = useMemo(() => {
+    if (activeThread?.automation) {
+      return deriveComposerActivityDetailsWithSubagentHistory(
+        threadActivities,
+        activeActivityTurnId,
+        activePlan,
+      );
+    }
+    return deriveComposerActivityDetails(threadActivities, activeActivityTurnId, activePlan);
+  }, [activeActivityTurnId, activePlan, activeThread?.automation, threadActivities]);
   const planSidebarLabel = sidebarProposedPlan || interactionMode === "plan" ? "Plan" : "Tasks";
   const showPlanFollowUpPrompt =
     pendingUserInputs.length === 0 &&

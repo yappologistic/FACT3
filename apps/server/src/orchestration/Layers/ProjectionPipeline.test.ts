@@ -2462,6 +2462,132 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       ]);
     }),
   );
+
+  it.effect("keeps a lightweight distinct sub-agent count on the thread shell", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)));
+
+      yield* appendAndProject({
+        type: "project.created",
+        eventId: EventId.make("evt-subagent-summary-project"),
+        aggregateKind: "project",
+        aggregateId: ProjectId.make("project-subagent-summary"),
+        occurredAt: "2026-08-03T00:00:00.000Z",
+        commandId: CommandId.make("cmd-subagent-summary-project"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-subagent-summary-project"),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make("project-subagent-summary"),
+          title: "Sub-agent summary",
+          workspaceRoot: "/tmp/project-subagent-summary",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: "2026-08-03T00:00:00.000Z",
+          updatedAt: "2026-08-03T00:00:00.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.created",
+        eventId: EventId.make("evt-subagent-summary-thread"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-subagent-summary"),
+        occurredAt: "2026-08-03T00:00:01.000Z",
+        commandId: CommandId.make("cmd-subagent-summary-thread"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-subagent-summary-thread"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-subagent-summary"),
+          projectId: ProjectId.make("project-subagent-summary"),
+          title: "Run parallel review",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "gpt-5.6-sol",
+          },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          createdAt: "2026-08-03T00:00:01.000Z",
+          updatedAt: "2026-08-03T00:00:01.000Z",
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-subagent-summary-spawn"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-subagent-summary"),
+        occurredAt: "2026-08-03T00:00:02.000Z",
+        commandId: CommandId.make("cmd-subagent-summary-spawn"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-subagent-summary-spawn"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-subagent-summary"),
+          activity: {
+            id: EventId.make("activity-subagent-summary-spawn"),
+            tone: "info",
+            kind: "tool.started",
+            summary: "Spawn two reviewers",
+            payload: {
+              itemType: "collab_agent_tool_call",
+              collab: { receiverThreadIds: ["agent-review", "agent-tests"] },
+            },
+            turnId: TurnId.make("turn-subagent-summary"),
+            createdAt: "2026-08-03T00:00:02.000Z",
+          },
+        },
+      });
+
+      yield* appendAndProject({
+        type: "thread.activity-appended",
+        eventId: EventId.make("evt-subagent-summary-update"),
+        aggregateKind: "thread",
+        aggregateId: ThreadId.make("thread-subagent-summary"),
+        occurredAt: "2026-08-03T00:00:03.000Z",
+        commandId: CommandId.make("cmd-subagent-summary-update"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-subagent-summary-update"),
+        metadata: {},
+        payload: {
+          threadId: ThreadId.make("thread-subagent-summary"),
+          activity: {
+            id: EventId.make("activity-subagent-summary-update"),
+            tone: "info",
+            kind: "tool.updated",
+            summary: "Reviewer update",
+            payload: {
+              itemType: "collab_agent_tool_call",
+              data: {
+                item: {
+                  agentThreadId: "agent-review",
+                  agentPath: "/root/review",
+                },
+              },
+            },
+            turnId: TurnId.make("turn-subagent-summary"),
+            createdAt: "2026-08-03T00:00:03.000Z",
+          },
+        },
+      });
+
+      const rows = yield* sql<{ readonly subagentCount: number }>`
+        SELECT subagent_count AS "subagentCount"
+        FROM projection_threads
+        WHERE thread_id = 'thread-subagent-summary'
+      `;
+      assert.deepEqual(rows, [{ subagentCount: 2 }]);
+    }),
+  );
 });
 
 it.layer(makeProjectionPipelinePrefixedTestLayer("t3-pending-turn-terminal-test-"))(

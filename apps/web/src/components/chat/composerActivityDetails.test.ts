@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   deriveComposerActivityDetails,
+  deriveComposerActivityDetailsWithSubagentHistory,
   deriveLatestComposerActivityTurnId,
   deriveSubagentAssistantMessageIds,
   formatComposerToolData,
@@ -245,5 +246,43 @@ describe("deriveComposerActivityDetails", () => {
     ];
 
     expect(deriveLatestComposerActivityTurnId(activities)).toBe(TurnId.make("turn-latest"));
+  });
+
+  it("retains implementation sub-agents when an autonomous verification turn becomes latest", () => {
+    const activities = [
+      makeActivity({
+        id: "implementation-agent",
+        kind: "tool.started",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          collab: {
+            tool: "spawnAgent",
+            receiverThreadIds: ["agent-1"],
+            agentPaths: { "agent-1": "/root/conventions_review" },
+            agentsStates: { "agent-1": { status: "completed" } },
+          },
+        },
+        sequence: 1,
+        turnId: "implementation-turn",
+      }),
+      makeActivity({
+        id: "verification-command",
+        kind: "tool.completed",
+        payload: { toolCallId: "verify-1", itemType: "command_execution" },
+        sequence: 2,
+        turnId: "verification-turn",
+      }),
+    ];
+
+    const details = deriveComposerActivityDetailsWithSubagentHistory(
+      activities,
+      TurnId.make("verification-turn"),
+      null,
+    );
+
+    expect(details.tools).toHaveLength(1);
+    expect(details.subagents).toEqual([
+      expect.objectContaining({ id: "agent-1", name: "Conventions review" }),
+    ]);
   });
 });

@@ -150,7 +150,7 @@ function normalizeItemStatus(
 }
 
 function displayAgentPath(path: string): string {
-  const segment = path.split("/").filter(Boolean).at(-1) ?? path;
+  const segment = path.split("/").toReversed().find(Boolean) ?? path;
   const words = segment.replace(/[_-]+/g, " ").trim();
   return words.length > 0 ? words.charAt(0).toUpperCase() + words.slice(1) : "Sub-agent";
 }
@@ -458,6 +458,20 @@ export function deriveComposerActivityDetails(
     subagents,
     tasks,
     hasHistory: tools.length > 0 || subagents.length > 0 || tasks.length > 0,
+  };
+}
+
+export function deriveComposerActivityDetailsWithSubagentHistory(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  turnId: TurnId | null | undefined,
+  activePlan: ActivePlanState | null,
+): ComposerActivityDetails {
+  const currentTurn = deriveComposerActivityDetails(activities, turnId, activePlan);
+  const subagents = deriveComposerActivityDetails(activities, null, null).subagents;
+  return {
+    ...currentTurn,
+    subagents,
+    hasHistory: currentTurn.hasHistory || subagents.length > 0,
   };
 }
 

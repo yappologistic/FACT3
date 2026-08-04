@@ -17,6 +17,7 @@ import {
   automationConflictBlockers,
   automationConcurrencyLimit,
   automationDispatchCompletion,
+  automationFailureCanRetry,
   automationIsStalled,
   automationStuckDeadline,
   buildAutomationPrompt,
@@ -284,6 +285,26 @@ describe("automation scheduler decisions", () => {
     expect(automationCanRetry(task({ id: "retry", stage: "failed", attempt: 1 }))).toBe(true);
     expect(
       automationCanRetry(task({ id: "exhausted", stage: "failed", attempt: 2, maxAttempts: 2 })),
+    ).toBe(false);
+  });
+
+  it("retries transient failures but stops on permanent repository setup failures", () => {
+    expect(automationFailureCanRetry("The provider process exited unexpectedly.")).toBe(true);
+    expect(automationFailureCanRetry("The autonomous run exceeded its runtime limit.")).toBe(true);
+    expect(
+      automationFailureCanRetry(
+        "No supported VCS repository was detected at D:/project. Initialize Git first.",
+      ),
+    ).toBe(false);
+    expect(
+      automationFailureCanRetry(
+        "git worktree add failed because HEAD does not have any commits yet",
+      ),
+    ).toBe(false);
+    expect(
+      automationFailureCanRetry(
+        "Approved dependency output is unavailable for: contracts. Reopen the task.",
+      ),
     ).toBe(false);
   });
 

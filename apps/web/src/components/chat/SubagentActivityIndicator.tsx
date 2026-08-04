@@ -53,28 +53,43 @@ export const SubagentAvatar = memo(function SubagentAvatar(props: {
   );
 });
 
+export const SubagentAvatarStack = memo(function SubagentAvatarStack(props: {
+  readonly animated?: boolean;
+  readonly count: number;
+}) {
+  if (props.count <= 0) return null;
+  const visibleOrbCount = Math.min(props.count, MAX_VISIBLE_ORBS);
+
+  return (
+    <span className="subagent-activity-stack flex items-center">
+      {Array.from({ length: visibleOrbCount }, (_, index) => (
+        <SubagentAvatar
+          {...(props.animated === undefined ? {} : { animated: props.animated })}
+          index={index}
+          key={index}
+          zIndex={visibleOrbCount - index}
+        />
+      ))}
+      <span className="subagent-activity-count" key={props.count}>
+        {props.count}
+      </span>
+    </span>
+  );
+});
+
 export const SubagentActivityIndicator = memo(function SubagentActivityIndicator(props: {
   readonly count: number;
 }) {
   if (props.count <= 0) {
     return null;
   }
-  const visibleOrbCount = Math.min(props.count, MAX_VISIBLE_ORBS);
-
   return (
     <span
       aria-hidden="true"
       className="subagent-activity-indicator flex min-w-20 shrink-0 items-center justify-center border-l border-border/60 px-3"
       data-subagent-count={props.count}
     >
-      <span className="subagent-activity-stack flex items-center">
-        {Array.from({ length: visibleOrbCount }, (_, index) => (
-          <SubagentAvatar index={index} key={index} zIndex={visibleOrbCount - index} />
-        ))}
-        <span className="subagent-activity-count" key={props.count}>
-          {props.count}
-        </span>
-      </span>
+      <SubagentAvatarStack count={props.count} />
     </span>
   );
 });

@@ -176,6 +176,52 @@ function derivePendingUserInputCountFromActivities(
   return openRequestIds.size;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function asStringArray(value: unknown): ReadonlyArray<string> {
+  return Array.isArray(value)
+    ? value.flatMap((item) => {
+        const text = asNonEmptyString(item);
+        return text === null ? [] : [text];
+      })
+    : [];
+}
+
+function deriveSubagentCountFromActivities(
+  activities: ReadonlyArray<ProjectionThreadActivity>,
+): number {
+  const ids = new Set<string>();
+
+  for (const activity of activities) {
+    const payload = asRecord(activity.payload);
+    if (asNonEmptyString(payload?.itemType) !== "collab_agent_tool_call") continue;
+
+    const data = asRecord(payload?.data);
+    const item = asRecord(data?.item) ?? data;
+    const collab = asRecord(payload?.collab);
+    const directId = asNonEmptyString(item?.agentThreadId);
+    const directPath = asNonEmptyString(item?.agentPath);
+
+    for (const id of [
+      ...asStringArray(collab?.receiverThreadIds),
+      ...asStringArray(item?.receiverThreadIds),
+      ...(directId !== null && directPath !== "/root" ? [directId] : []),
+    ]) {
+      ids.add(id);
+    }
+  }
+
+  return ids.size;
+}
+
 function deriveHasActionableProposedPlan(input: {
   readonly latestTurnId: string | null;
   readonly proposedPlans: ReadonlyArray<ProjectionThreadProposedPlan>;
@@ -589,6 +635,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         (approval) => approval.status === "pending",
       ).length;
       const pendingUserInputCount = derivePendingUserInputCountFromActivities(activities);
+      const subagentCount = deriveSubagentCountFromActivities(activities);
       const hasActionableProposedPlan = deriveHasActionableProposedPlan({
         latestTurnId: existingRow.value.latestTurnId,
         proposedPlans,
@@ -600,6 +647,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
         pendingApprovalCount,
         pendingUserInputCount,
         hasActionableProposedPlan: hasActionableProposedPlan ? 1 : 0,
+        subagentCount,
       });
     });
 
@@ -631,6 +679,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             pendingApprovalCount: 0,
             pendingUserInputCount: 0,
             hasActionableProposedPlan: 0,
+            subagentCount: 0,
             automation: null,
             deletedAt: null,
           });

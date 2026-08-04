@@ -396,6 +396,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          subagent_count AS "subagentCount",
           automation_json AS "automation",
           deleted_at AS "deletedAt"
         FROM projection_threads
@@ -431,6 +432,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          subagent_count AS "subagentCount",
           automation_json AS "automation",
           deleted_at AS "deletedAt"
         FROM projection_threads
@@ -468,6 +470,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          subagent_count AS "subagentCount",
           automation_json AS "automation",
           deleted_at AS "deletedAt"
         FROM projection_threads
@@ -907,6 +910,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          subagent_count AS "subagentCount",
           automation_json AS "automation",
           deleted_at AS "deletedAt"
         FROM projection_threads
@@ -1689,6 +1693,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       hasPendingApprovals: row.pendingApprovalCount > 0,
                       hasPendingUserInput: row.pendingUserInputCount > 0,
                       hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                      subagentCount: row.subagentCount ?? 0,
                       ...(row.automation != null ? { automation: row.automation } : {}),
                     } satisfies OrchestrationThreadShell)
                   : Result.failVoid,
@@ -1829,6 +1834,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   hasPendingApprovals: row.pendingApprovalCount > 0,
                   hasPendingUserInput: row.pendingUserInputCount > 0,
                   hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                  subagentCount: row.subagentCount ?? 0,
                   ...(row.automation != null ? { automation: row.automation } : {}),
                 }),
               ),
@@ -2101,6 +2107,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
         hasPendingUserInput: threadRow.value.pendingUserInputCount > 0,
         hasActionableProposedPlan: threadRow.value.hasActionableProposedPlan > 0,
+        subagentCount: threadRow.value.subagentCount ?? 0,
         ...(threadRow.value.automation != null ? { automation: threadRow.value.automation } : {}),
       } satisfies OrchestrationThreadShell);
     });

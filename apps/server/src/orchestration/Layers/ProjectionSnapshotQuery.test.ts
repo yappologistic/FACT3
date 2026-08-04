@@ -82,6 +82,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           pending_approval_count,
           pending_user_input_count,
           has_actionable_proposed_plan,
+          subagent_count,
           created_at,
           updated_at,
           deleted_at
@@ -100,6 +101,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           1,
           0,
           0,
+          2,
           '2026-02-24T00:00:02.000Z',
           '2026-02-24T00:00:03.000Z',
           NULL
@@ -441,8 +443,15 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           hasPendingApprovals: true,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
+          subagentCount: 2,
         },
       ]);
+
+      const threadShell = yield* snapshotQuery.getThreadShellById(ThreadId.make("thread-1"));
+      assert.equal(threadShell._tag, "Some");
+      if (threadShell._tag === "Some") {
+        assert.equal(threadShell.value.subagentCount, 2);
+      }
 
       const threadDetail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-1"));
       assert.equal(threadDetail._tag, "Some");

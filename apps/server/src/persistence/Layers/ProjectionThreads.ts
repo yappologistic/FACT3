@@ -54,6 +54,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count,
           pending_user_input_count,
           has_actionable_proposed_plan,
+          subagent_count,
           automation_json,
           deleted_at
         )
@@ -80,6 +81,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.pendingApprovalCount},
           ${row.pendingUserInputCount},
           ${row.hasActionableProposedPlan},
+          ${row.subagentCount ?? 0},
           ${row.automation != null ? JSON.stringify(row.automation) : null},
           ${row.deletedAt}
         )
@@ -106,6 +108,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count = excluded.pending_approval_count,
           pending_user_input_count = excluded.pending_user_input_count,
           has_actionable_proposed_plan = excluded.has_actionable_proposed_plan,
+          subagent_count = excluded.subagent_count,
           automation_json = excluded.automation_json,
           deleted_at = excluded.deleted_at
       `,
@@ -139,6 +142,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          subagent_count AS "subagentCount",
           automation_json AS "automation",
           deleted_at AS "deletedAt"
         FROM projection_threads
@@ -174,6 +178,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           pending_approval_count AS "pendingApprovalCount",
           pending_user_input_count AS "pendingUserInputCount",
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
+          subagent_count AS "subagentCount",
           automation_json AS "automation",
           deleted_at AS "deletedAt"
         FROM projection_threads

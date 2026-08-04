@@ -36,9 +36,11 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
 import GitActionsControl from "~/components/GitActionsControl";
 import {
-  deriveComposerActivityDetails,
+  deriveComposerActivityDetailsWithSubagentHistory,
   deriveLatestComposerActivityTurnId,
+  type ComposerSubagentActivityItem,
 } from "~/components/chat/composerActivityDetails";
+import { SubagentAvatar, SubagentAvatarStack } from "~/components/chat/SubagentActivityIndicator";
 import { Button } from "~/components/ui/button";
 import {
   Dialog,
@@ -207,6 +209,7 @@ const KanbanCard = memo(function KanbanCard(props: {
   readonly onSelect: (thread: EnvironmentThreadShell) => void;
 }) {
   const stateLabel = stateLabelForThread(props.thread, props.allThreads);
+  const subagentCount = props.thread.subagentCount ?? 0;
   const quietStateLabel =
     props.lane === "history"
       ? props.thread.archivedAt
@@ -271,9 +274,18 @@ const KanbanCard = memo(function KanbanCard(props: {
           <CardStateIcon thread={props.thread} lane={props.lane} stateLabel={stateLabel} />
           <span className="truncate">{quietStateLabel}</span>
         </span>
-        <span className="max-w-[46%] truncate rounded-full border border-foreground/[0.07] bg-foreground/[0.035] px-2 py-0.5 text-[10px] text-muted-foreground/80">
-          {compactModelLabel(props.thread.modelSelection.model)}
-        </span>
+        {subagentCount > 0 ? (
+          <span
+            aria-label={`${subagentCount} sub-agent${subagentCount === 1 ? "" : "s"} used by this task`}
+            className="flex shrink-0 items-center rounded-full border border-foreground/[0.08] bg-foreground/[0.03] px-1.5 py-0.5"
+          >
+            <SubagentAvatarStack animated={props.lane === "running"} count={subagentCount} />
+          </span>
+        ) : (
+          <span className="max-w-[46%] truncate rounded-full border border-foreground/[0.07] bg-foreground/[0.035] px-2 py-0.5 text-[10px] text-muted-foreground/80">
+            {compactModelLabel(props.thread.modelSelection.model)}
+          </span>
+        )}
       </span>
     </button>
   );
@@ -383,6 +395,134 @@ function StatusDot({
         status === "failed" ? "text-destructive" : "text-muted-foreground/55",
       )}
     />
+  );
+}
+
+function KanbanSubagentsSection(props: {
+  readonly subagents: ReadonlyArray<ComposerSubagentActivityItem>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const anyRunning = props.subagents.some((item) => item.status === "running");
+  const panelId = "kanban-subagents-panel";
+
+  return (
+    <section
+      aria-labelledby="kanban-subagents-heading"
+      className="border-t border-foreground/[0.07] pt-4"
+    >
+      <button
+        type="button"
+        aria-controls={panelId}
+        aria-expanded={open}
+        className="group/subagents flex w-full items-center justify-between gap-3 rounded-[12px] text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        onClick={() => setOpen((current) => !current)}
+      >
+        <span>
+          <span
+            id="kanban-subagents-heading"
+            className="block text-[11px] font-medium text-foreground/82"
+          >
+            Sub-agents
+          </span>
+          <span className="mt-0.5 block text-[10px] text-muted-foreground/62">
+            {anyRunning ? "Working in parallel" : "Work completed"}
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-foreground/[0.08] bg-foreground/[0.03] py-1 pl-2 pr-1.5 transition-colors group-hover/subagents:border-foreground/15 group-hover/subagents:bg-foreground/[0.05] motion-reduce:transition-none">
+          <span aria-hidden="true">
+            <SubagentAvatarStack animated={anyRunning} count={props.subagents.length} />
+          </span>
+          <ChevronRightIcon
+            aria-hidden
+            className={cn(
+              "size-3 text-muted-foreground/55 transition-transform duration-150 motion-reduce:transition-none",
+              open && "rotate-90",
+            )}
+          />
+          <span className="sr-only">
+            {props.subagents.length} sub-agent{props.subagents.length === 1 ? "" : "s"}
+          </span>
+        </span>
+      </button>
+
+      {open ? (
+        <div
+          id={panelId}
+          className="mt-2.5 space-y-1.5 animate-in fade-in duration-150 motion-reduce:animate-none"
+        >
+          {props.subagents.map((subagent, index) => {
+            const expanded = expandedId === subagent.id;
+            const detailId = `kanban-subagent-${index}-detail`;
+            return (
+              <div
+                key={subagent.id}
+                className="overflow-hidden rounded-[14px] border border-foreground/[0.065] bg-foreground/[0.018]"
+              >
+                <button
+                  type="button"
+                  aria-controls={detailId}
+                  aria-expanded={expanded}
+                  className="flex w-full items-center gap-2.5 px-2.5 py-2 text-left outline-none transition-colors hover:bg-foreground/[0.025] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring motion-reduce:transition-none"
+                  onClick={() =>
+                    setExpandedId((current) => (current === subagent.id ? null : subagent.id))
+                  }
+                >
+                  <SubagentAvatar animated={subagent.status === "running"} index={index} />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[11px] font-medium text-foreground/84">
+                      {subagent.name}
+                    </span>
+                    {subagent.model || subagent.reasoningEffort ? (
+                      <span className="mt-0.5 block truncate text-[9px] text-muted-foreground/62">
+                        {[
+                          subagent.model ? compactModelLabel(subagent.model) : null,
+                          subagent.reasoningEffort,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    ) : null}
+                  </span>
+                  <StatusDot status={subagent.status} />
+                  <ChevronRightIcon
+                    aria-hidden
+                    className={cn(
+                      "size-3 shrink-0 text-muted-foreground/45 transition-transform duration-150 motion-reduce:transition-none",
+                      expanded && "rotate-90",
+                    )}
+                  />
+                </button>
+                {expanded ? (
+                  <div
+                    id={detailId}
+                    className="space-y-2 border-t border-foreground/[0.055] px-3 py-2.5 text-[10px] leading-4 text-muted-foreground/76 animate-in fade-in duration-150 motion-reduce:animate-none"
+                  >
+                    <div>
+                      <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground/52">
+                        Assignment
+                      </p>
+                      <p className="mt-0.5 whitespace-pre-wrap">
+                        {subagent.prompt ??
+                          `The runtime identified this assignment as “${subagent.name}” but did not report its full prompt.`}
+                      </p>
+                    </div>
+                    {subagent.result ? (
+                      <div>
+                        <p className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground/52">
+                          Result
+                        </p>
+                        <p className="mt-0.5 whitespace-pre-wrap">{subagent.result}</p>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -503,7 +643,12 @@ function KanbanInspector(props: {
     [activityTurnId, thread?.activities],
   );
   const details = useMemo(
-    () => deriveComposerActivityDetails(thread?.activities ?? [], activityTurnId, activePlan),
+    () =>
+      deriveComposerActivityDetailsWithSubagentHistory(
+        thread?.activities ?? [],
+        activityTurnId,
+        activePlan,
+      ),
     [activePlan, activityTurnId, thread?.activities],
   );
   const latestCheckpoint = thread?.checkpoints.at(-1) ?? null;
@@ -1142,6 +1287,10 @@ function KanbanInspector(props: {
                 )}
               </div>
             </section>
+
+            {details.subagents.length > 0 ? (
+              <KanbanSubagentsSection subagents={details.subagents} />
+            ) : null}
 
             {automation?.taskKind !== "planning" ? (
               <section

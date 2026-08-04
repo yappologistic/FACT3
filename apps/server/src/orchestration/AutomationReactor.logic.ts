@@ -220,6 +220,26 @@ export function automationCanRetry(thread: OrchestrationThread): boolean {
   return Boolean(thread.automation && thread.automation.attempt < thread.automation.maxAttempts);
 }
 
+const NON_RETRYABLE_AUTOMATION_FAILURES = [
+  "no supported vcs repository was detected",
+  "not a git repository",
+  "does not have any commits",
+  "needed a single revision",
+  "bad revision 'head'",
+  "unknown revision or path not in the working tree",
+  "approved dependency output is unavailable",
+] as const;
+
+/**
+ * Permanent repository setup failures cannot improve on another autonomous
+ * attempt. Leave those for the user once, while transient provider/runtime
+ * failures keep using the configured retry budget.
+ */
+export function automationFailureCanRetry(detail: string): boolean {
+  const normalized = detail.toLowerCase();
+  return !NON_RETRYABLE_AUTOMATION_FAILURES.some((failure) => normalized.includes(failure));
+}
+
 /**
  * Finds the checkpoint produced by the automation dispatch represented by the
  * current heartbeat. Completed turns are intentionally removed from the thread

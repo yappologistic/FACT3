@@ -146,17 +146,20 @@ export function KanbanProjectGoalDialog(props: {
 
   return (
     <Dialog open={props.open} onOpenChange={(open) => !submitting && props.onOpenChange(open)}>
-      <DialogPopup className="max-w-xl overflow-hidden">
-        <DialogHeader>
-          <DialogTitle className="text-lg">Plan a project goal</DialogTitle>
-          <DialogDescription>
+      <DialogPopup className="max-w-[40rem] overflow-hidden">
+        <DialogHeader className="gap-1.5 px-6 pb-4 pt-5">
+          <DialogTitle className="text-base font-medium leading-5">Plan a project goal</DialogTitle>
+          <DialogDescription className="max-w-[35rem] text-xs leading-5 text-muted-foreground/76">
             Give FACT3 one outcome. A planning agent will inspect the repository and propose a
             dependency-safe execution plan for your approval. It will not edit files.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="space-y-4">
+        <DialogPanel className="space-y-5 px-6 pb-5 pt-0">
           <div>
-            <Label htmlFor="kanban-project-goal" className="mb-1.5 block text-xs font-medium">
+            <Label
+              htmlFor="kanban-project-goal"
+              className="mb-1.5 block text-[11px] font-medium leading-4 text-foreground/78"
+            >
               Project goal
             </Label>
             <Textarea
@@ -169,7 +172,10 @@ export function KanbanProjectGoalDialog(props: {
             />
           </div>
           <div>
-            <Label htmlFor="kanban-plan-base-branch" className="mb-1.5 block text-xs font-medium">
+            <Label
+              htmlFor="kanban-plan-base-branch"
+              className="mb-1.5 block text-[11px] font-medium leading-4 text-foreground/78"
+            >
               Plan from branch
             </Label>
             <Input
@@ -184,12 +190,12 @@ export function KanbanProjectGoalDialog(props: {
             value={modelSelection}
             onChange={setModelSelection}
           />
-          <div className="rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.025] px-3.5 py-3 text-[11px] leading-4 text-muted-foreground">
+          <div className="rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3 text-[11px] leading-[1.45] text-muted-foreground/72">
             The proposal will assign task order, likely file ownership, the model and reasoning
             level, plus verification checks. Implementation begins only after you approve it.
           </div>
         </DialogPanel>
-        <DialogFooter>
+        <DialogFooter className="bg-muted/56 px-6 py-3.5">
           <Button variant="ghost" onClick={() => props.onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>

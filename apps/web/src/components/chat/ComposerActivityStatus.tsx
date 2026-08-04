@@ -551,7 +551,7 @@ export const ComposerActivityStatus = memo(function ComposerActivityStatus(props
   const statusLabel = [
     visibleActivity.title,
     visibleActivity.detail,
-    displayedSubagentCount > 0
+    props.isActive && displayedSubagentCount > 0
       ? `${displayedSubagentCount} ${displayedSubagentCount === 1 ? "sub-agent" : "sub-agents"}${props.isActive ? " running" : ""}`
       : null,
   ]

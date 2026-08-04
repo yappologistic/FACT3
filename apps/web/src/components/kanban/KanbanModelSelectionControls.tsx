@@ -80,8 +80,8 @@ export function KanbanModelSelectionControls(props: {
 
   return (
     <div>
-      <p className="mb-1.5 text-xs font-medium text-foreground/82">Agent runtime</p>
-      <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] p-2">
+      <p className="mb-1.5 text-[11px] font-medium leading-4 text-foreground/78">Agent runtime</p>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] p-1.5">
         <ProviderModelPicker
           activeInstanceId={value.instanceId}
           model={value.model}
@@ -113,7 +113,7 @@ export function KanbanModelSelectionControls(props: {
           }
         />
       </div>
-      <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground/62">
+      <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground/60">
         The selected provider, model, reasoning level, and speed settings apply to this task only.
       </p>
     </div>

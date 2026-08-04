@@ -62,7 +62,10 @@ function commandError(title: string, description: string) {
 
 function FieldLabel(props: { readonly htmlFor: string; readonly children: ReactNode }) {
   return (
-    <Label htmlFor={props.htmlFor} className="mb-1.5 block text-xs font-medium text-foreground/82">
+    <Label
+      htmlFor={props.htmlFor}
+      className="mb-1.5 block text-[11px] font-medium leading-4 text-foreground/78"
+    >
       {props.children}
     </Label>
   );
@@ -224,46 +227,48 @@ export function KanbanNewTaskDialog(props: {
         if (!submitting) props.onOpenChange(open);
       }}
     >
-      <DialogPopup className="max-w-xl overflow-hidden">
-        <DialogHeader>
-          <DialogTitle className="text-lg">New autonomous task</DialogTitle>
-          <DialogDescription>
+      <DialogPopup className="max-w-[40rem] overflow-hidden">
+        <DialogHeader className="gap-1.5 px-6 pb-4 pt-5">
+          <DialogTitle className="text-base font-medium leading-5">New autonomous task</DialogTitle>
+          <DialogDescription className="max-w-[34rem] text-xs leading-5 text-muted-foreground/76">
             Create one durable work item. FACT3 will run it in a dedicated worktree when Autopilot
             has capacity.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="space-y-4">
-          <div>
-            <FieldLabel htmlFor="kanban-task-title">Task name</FieldLabel>
-            <Input
-              id="kanban-task-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Implement account settings"
-              autoFocus
-            />
-          </div>
-          <div>
-            <FieldLabel htmlFor="kanban-task-goal">Goal</FieldLabel>
-            <Textarea
-              id="kanban-task-goal"
-              value={goal}
-              onChange={(event) => setGoal(event.target.value)}
-              placeholder="Describe the outcome the agent owns, including the user-facing behavior."
-              className="min-h-24"
-            />
-          </div>
-          <div>
-            <FieldLabel htmlFor="kanban-task-criteria">Acceptance criteria</FieldLabel>
-            <Textarea
-              id="kanban-task-criteria"
-              value={criteria}
-              onChange={(event) => setCriteria(event.target.value)}
-              placeholder={
-                "One testable condition per line\nKeyboard navigation works\nFocused tests pass"
-              }
-              className="min-h-20"
-            />
+        <DialogPanel className="space-y-5 px-6 pb-5 pt-0">
+          <div className="space-y-3.5">
+            <div>
+              <FieldLabel htmlFor="kanban-task-title">Task name</FieldLabel>
+              <Input
+                id="kanban-task-title"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Implement account settings"
+                autoFocus
+              />
+            </div>
+            <div>
+              <FieldLabel htmlFor="kanban-task-goal">Goal</FieldLabel>
+              <Textarea
+                id="kanban-task-goal"
+                value={goal}
+                onChange={(event) => setGoal(event.target.value)}
+                placeholder="Describe the outcome the agent owns, including the user-facing behavior."
+                className="min-h-24"
+              />
+            </div>
+            <div>
+              <FieldLabel htmlFor="kanban-task-criteria">Acceptance criteria</FieldLabel>
+              <Textarea
+                id="kanban-task-criteria"
+                value={criteria}
+                onChange={(event) => setCriteria(event.target.value)}
+                placeholder={
+                  "One testable condition per line\nKeyboard navigation works\nFocused tests pass"
+                }
+                className="min-h-20"
+              />
+            </div>
           </div>
 
           <KanbanModelSelectionControls
@@ -275,14 +280,16 @@ export function KanbanNewTaskDialog(props: {
 
           {dependencyOptions.length > 0 ? (
             <fieldset>
-              <legend className="mb-1.5 text-xs font-medium text-foreground/82">Wait for</legend>
-              <div className="max-h-32 space-y-1 overflow-y-auto rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] p-1.5">
+              <legend className="mb-1.5 text-[11px] font-medium leading-4 text-foreground/78">
+                Wait for
+              </legend>
+              <div className="max-h-32 space-y-0.5 overflow-y-auto rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] p-1.5">
                 {dependencyOptions.map((thread) => {
                   const checked = dependencies.has(thread.id);
                   return (
                     <label
                       key={thread.id}
-                      className="flex cursor-pointer items-center gap-2 rounded-[10px] px-2.5 py-2 text-xs text-foreground/82 hover:bg-foreground/[0.045]"
+                      className="flex cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-xs leading-4 text-foreground/80 transition-colors hover:bg-foreground/[0.045]"
                     >
                       <Checkbox
                         checked={checked}
@@ -303,8 +310,8 @@ export function KanbanNewTaskDialog(props: {
             </fieldset>
           ) : null}
 
-          <details className="group rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] p-3">
-            <summary className="cursor-pointer select-none text-xs font-medium text-foreground/78">
+          <details className="group rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3">
+            <summary className="cursor-pointer select-none text-[11px] font-medium leading-4 text-foreground/78 marker:text-muted-foreground/68">
               Run limits
             </summary>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -364,12 +371,12 @@ export function KanbanNewTaskDialog(props: {
             </div>
           </details>
 
-          <p className="text-[11px] leading-4 text-muted-foreground/72">
+          <p className="border-t border-foreground/[0.055] pt-3 text-[11px] leading-4 text-muted-foreground/68">
             Runs with full access. Provider approval and user-input requests still stop in Needs
             attention.
           </p>
         </DialogPanel>
-        <DialogFooter>
+        <DialogFooter className="bg-muted/56 px-6 py-3.5">
           <Button variant="ghost" onClick={() => props.onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>

@@ -7,7 +7,7 @@ import {
   TaskActivityRow,
   ToolActivityRow,
 } from "./ComposerActivityStatus";
-import { SubagentAvatar } from "./SubagentActivityIndicator";
+import { SubagentAvatar, SubagentAvatarStack } from "./SubagentActivityIndicator";
 import type { ComposerActivityDetails, ComposerToolActivityItem } from "./composerActivityDetails";
 
 const EMPTY_DETAILS: ComposerActivityDetails = {
@@ -117,6 +117,15 @@ describe("ComposerActivityStatus", () => {
       expect(markup).toContain(`/subagent-avatars/${texture}.webp`);
     }
     expect(markup.match(/data-animated="true"/g)).toHaveLength(10);
+  });
+
+  it("reuses the compact avatar stack without animating completed groups", () => {
+    const markup = renderToStaticMarkup(<SubagentAvatarStack animated={false} count={4} />);
+
+    expect(markup).toContain("subagent-activity-stack");
+    expect(markup.match(/class="subagent-activity-orb"/g)).toHaveLength(3);
+    expect(markup).toContain('data-animated="false"');
+    expect(markup).toContain(">4</span>");
   });
 
   it("renders command details as compact monospace activity", () => {
@@ -238,6 +247,7 @@ describe("ComposerActivityStatus", () => {
     expect(markup).toContain("Agent finished working");
     expect(markup).toContain("1 tool call · 1 sub-agent");
     expect(markup).toContain('data-subagent-count="1"');
+    expect(markup).not.toContain("1 tool call · 1 sub-agent, 1 sub-agent");
     expect(markup).not.toContain("thinking-orb-motion");
   });
 });
