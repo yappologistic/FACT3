@@ -149,7 +149,7 @@ export function KanbanProjectGoalDialog(props: {
       <DialogPopup className="max-w-[40rem] overflow-hidden">
         <DialogHeader className="gap-1.5 px-6 pb-4 pt-5">
           <DialogTitle className="text-base font-medium leading-5">Plan a project goal</DialogTitle>
-          <DialogDescription className="max-w-[35rem] text-xs leading-5 text-muted-foreground/76">
+          <DialogDescription className="max-w-[35rem] text-[12px] leading-5 text-muted-foreground/76">
             Give FACT3 one outcome. A planning agent will inspect the repository and propose a
             dependency-safe execution plan for your approval. It will not edit files.
           </DialogDescription>
@@ -158,12 +158,16 @@ export function KanbanProjectGoalDialog(props: {
           <div>
             <Label
               htmlFor="kanban-project-goal"
-              className="mb-1.5 block text-[11px] font-medium leading-4 text-foreground/78"
+              className="mb-1.5 flex w-full items-center justify-between text-[12px] font-medium leading-4 text-foreground/78"
             >
-              Project goal
+              <span>Project goal</span>
+              <span className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground/62">
+                Required
+              </span>
             </Label>
             <Textarea
               id="kanban-project-goal"
+              required
               value={goal}
               onChange={(event) => setGoal(event.target.value)}
               placeholder="Build an accessible project settings experience with persistence, tests, and migration safety."
@@ -174,12 +178,16 @@ export function KanbanProjectGoalDialog(props: {
           <div>
             <Label
               htmlFor="kanban-plan-base-branch"
-              className="mb-1.5 block text-[11px] font-medium leading-4 text-foreground/78"
+              className="mb-1.5 flex w-full items-center justify-between text-[12px] font-medium leading-4 text-foreground/78"
             >
-              Plan from branch
+              <span>Plan from branch</span>
+              <span className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground/62">
+                Required
+              </span>
             </Label>
             <Input
               id="kanban-plan-base-branch"
+              required
               value={baseBranch}
               onChange={(event) => setBaseBranch(event.target.value)}
             />
@@ -190,7 +198,7 @@ export function KanbanProjectGoalDialog(props: {
             value={modelSelection}
             onChange={setModelSelection}
           />
-          <div className="rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3 text-[11px] leading-[1.45] text-muted-foreground/72">
+          <div className="rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3 text-[12px] leading-[1.45] text-muted-foreground/72">
             The proposal will assign task order, likely file ownership, the model and reasoning
             level, plus verification checks. Implementation begins only after you approve it.
           </div>

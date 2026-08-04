@@ -56,17 +56,32 @@ export const DEFAULT_AUTOMATION_POLICY: OrchestrationProjectAutomationPolicy = {
   deliveryMode: "local-commit",
 };
 
+const DELIVERY_MODE_LABELS: Record<OrchestrationProjectAutomationPolicy["deliveryMode"], string> = {
+  "local-commit": "Local commit",
+  "push-branch": "Pushed branch",
+  "pull-request": "Pull request",
+};
+
 function commandError(title: string, description: string) {
   toastManager.add({ type: "error", title, description });
 }
 
-function FieldLabel(props: { readonly htmlFor: string; readonly children: ReactNode }) {
+function FieldLabel(props: {
+  readonly htmlFor: string;
+  readonly children: ReactNode;
+  readonly required?: boolean;
+}) {
   return (
     <Label
       htmlFor={props.htmlFor}
-      className="mb-1.5 block text-[11px] font-medium leading-4 text-foreground/78"
+      className="mb-1.5 flex w-full items-center justify-between text-[12px] font-medium leading-4 text-foreground/78"
     >
-      {props.children}
+      <span>{props.children}</span>
+      {props.required ? (
+        <span className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground/62">
+          Required
+        </span>
+      ) : null}
     </Label>
   );
 }
@@ -230,7 +245,7 @@ export function KanbanNewTaskDialog(props: {
       <DialogPopup className="max-w-[40rem] overflow-hidden">
         <DialogHeader className="gap-1.5 px-6 pb-4 pt-5">
           <DialogTitle className="text-base font-medium leading-5">New autonomous task</DialogTitle>
-          <DialogDescription className="max-w-[34rem] text-xs leading-5 text-muted-foreground/76">
+          <DialogDescription className="max-w-[34rem] text-[12px] leading-5 text-muted-foreground/76">
             Create one durable work item. FACT3 will run it in a dedicated worktree when Autopilot
             has capacity.
           </DialogDescription>
@@ -238,9 +253,12 @@ export function KanbanNewTaskDialog(props: {
         <DialogPanel className="space-y-5 px-6 pb-5 pt-0">
           <div className="space-y-3.5">
             <div>
-              <FieldLabel htmlFor="kanban-task-title">Task name</FieldLabel>
+              <FieldLabel htmlFor="kanban-task-title" required>
+                Task name
+              </FieldLabel>
               <Input
                 id="kanban-task-title"
+                required
                 value={title}
                 onChange={(event) => setTitle(event.target.value)}
                 placeholder="Implement account settings"
@@ -248,9 +266,12 @@ export function KanbanNewTaskDialog(props: {
               />
             </div>
             <div>
-              <FieldLabel htmlFor="kanban-task-goal">Goal</FieldLabel>
+              <FieldLabel htmlFor="kanban-task-goal" required>
+                Goal
+              </FieldLabel>
               <Textarea
                 id="kanban-task-goal"
+                required
                 value={goal}
                 onChange={(event) => setGoal(event.target.value)}
                 placeholder="Describe the outcome the agent owns, including the user-facing behavior."
@@ -269,6 +290,9 @@ export function KanbanNewTaskDialog(props: {
                 className="min-h-20"
               />
             </div>
+            <p className="text-[12px] leading-4 text-muted-foreground/62">
+              Task name and goal are required. Acceptance criteria are optional.
+            </p>
           </div>
 
           <KanbanModelSelectionControls
@@ -280,7 +304,7 @@ export function KanbanNewTaskDialog(props: {
 
           {dependencyOptions.length > 0 ? (
             <fieldset>
-              <legend className="mb-1.5 text-[11px] font-medium leading-4 text-foreground/78">
+              <legend className="mb-1.5 text-[12px] font-medium leading-4 text-foreground/78">
                 Wait for
               </legend>
               <div className="max-h-32 space-y-0.5 overflow-y-auto rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] p-1.5">
@@ -289,7 +313,7 @@ export function KanbanNewTaskDialog(props: {
                   return (
                     <label
                       key={thread.id}
-                      className="flex cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-xs leading-4 text-foreground/80 transition-colors hover:bg-foreground/[0.045]"
+                      className="flex cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-[12px] leading-4 text-foreground/80 transition-colors hover:bg-foreground/[0.045]"
                     >
                       <Checkbox
                         checked={checked}
@@ -311,7 +335,7 @@ export function KanbanNewTaskDialog(props: {
           ) : null}
 
           <details className="group rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3">
-            <summary className="cursor-pointer select-none text-[11px] font-medium leading-4 text-foreground/78 marker:text-muted-foreground/68">
+            <summary className="cursor-pointer select-none text-[12px] font-medium leading-4 text-foreground/78 marker:text-muted-foreground/68">
               Run limits
             </summary>
             <div className="mt-3 grid gap-3 sm:grid-cols-3">
@@ -334,7 +358,7 @@ export function KanbanNewTaskDialog(props: {
                   }
                   className="min-h-16"
                 />
-                <p className="mt-1 text-[10px] leading-4 text-muted-foreground/62">
+                <p className="mt-1 text-[11px] leading-4 text-muted-foreground/62">
                   Autopilot keeps overlapping paths out of the same parallel run.
                 </p>
               </div>
@@ -371,7 +395,7 @@ export function KanbanNewTaskDialog(props: {
             </div>
           </details>
 
-          <p className="border-t border-foreground/[0.055] pt-3 text-[11px] leading-4 text-muted-foreground/68">
+          <p className="border-t border-foreground/[0.055] pt-3 text-[12px] leading-4 text-muted-foreground/68">
             Runs with full access. Provider approval and user-input requests still stop in Needs
             attention.
           </p>
@@ -399,8 +423,8 @@ function PolicyToggle(props: {
   return (
     <label className="flex items-center justify-between gap-4 rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3">
       <span>
-        <span className="block text-xs font-medium text-foreground/84">{props.label}</span>
-        <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground/68">
+        <span className="block text-[12px] font-medium text-foreground/84">{props.label}</span>
+        <span className="mt-0.5 block text-[12px] leading-4 text-muted-foreground/68">
           {props.description}
         </span>
       </span>
@@ -439,13 +463,13 @@ export function KanbanAutomationSettingsDialog(props: {
   return (
     <Dialog open={props.open} onOpenChange={(open) => !saving && props.onOpenChange(open)}>
       <DialogPopup className="max-w-lg overflow-hidden">
-        <DialogHeader>
-          <DialogTitle className="text-lg">Autopilot settings</DialogTitle>
-          <DialogDescription>
+        <DialogHeader className="gap-1.5 px-6 pb-4 pt-5">
+          <DialogTitle className="text-base font-medium leading-5">Autopilot settings</DialogTitle>
+          <DialogDescription className="text-[12px] leading-5 text-muted-foreground/76">
             Bound parallel work, verification, review, and delivery for this project.
           </DialogDescription>
         </DialogHeader>
-        <DialogPanel className="space-y-4">
+        <DialogPanel className="space-y-4 px-6 pb-5 pt-0">
           <div className="grid gap-3 sm:grid-cols-3">
             <div>
               <FieldLabel htmlFor="kanban-policy-concurrency">Parallel runs</FieldLabel>
@@ -476,7 +500,7 @@ export function KanbanAutomationSettingsDialog(props: {
                 }}
               >
                 <SelectTrigger id="kanban-policy-delivery">
-                  <SelectValue />
+                  <SelectValue>{DELIVERY_MODE_LABELS[policy.deliveryMode]}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup>
                   <SelectItem value="local-commit">Local commit</SelectItem>
@@ -569,7 +593,7 @@ export function KanbanAutomationSettingsDialog(props: {
             </div>
           </div>
         </DialogPanel>
-        <DialogFooter>
+        <DialogFooter className="bg-muted/56 px-6 py-3.5">
           <Button variant="ghost" onClick={() => props.onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>

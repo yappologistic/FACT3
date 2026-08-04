@@ -50,7 +50,7 @@ export function KanbanModelSelectionControls(props: {
 
   if (!value || !activeEntry) {
     return (
-      <div className="rounded-[14px] border border-destructive/15 bg-destructive/[0.035] px-3.5 py-3 text-[11px] leading-4 text-destructive-foreground/82">
+      <div className="rounded-[14px] border border-destructive/15 bg-destructive/[0.035] px-3.5 py-3 text-[12px] leading-4 text-destructive-foreground/82">
         No enabled provider is available. Enable a provider in Settings before creating this task.
       </div>
     );
@@ -80,7 +80,7 @@ export function KanbanModelSelectionControls(props: {
 
   return (
     <div>
-      <p className="mb-1.5 text-[11px] font-medium leading-4 text-foreground/78">Agent runtime</p>
+      <p className="mb-1.5 text-[12px] font-medium leading-4 text-foreground/78">Agent runtime</p>
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] p-1.5">
         <ProviderModelPicker
           activeInstanceId={value.instanceId}
@@ -90,7 +90,7 @@ export function KanbanModelSelectionControls(props: {
           modelOptionsByInstance={modelOptionsByInstance}
           triggerVariant="outline"
           triggerAriaLabel="Choose provider and model"
-          triggerClassName="h-8 max-w-[18rem] flex-1 justify-between px-2.5 text-xs sm:max-w-[22rem]"
+          triggerClassName="h-8 max-w-[18rem] flex-1 justify-between px-2.5 text-[12px] sm:max-w-[22rem]"
           onInstanceModelChange={selectModel}
         />
         <TraitsPicker
@@ -103,7 +103,7 @@ export function KanbanModelSelectionControls(props: {
           modelOptions={value.options}
           allowPromptInjectedEffort={false}
           triggerVariant="outline"
-          triggerClassName="h-8 max-w-[16rem] px-2.5 text-xs"
+          triggerClassName="h-8 max-w-[16rem] px-2.5 text-[12px]"
           onModelOptionsChange={(options) =>
             props.onChange({
               instanceId: value.instanceId,
@@ -113,7 +113,7 @@ export function KanbanModelSelectionControls(props: {
           }
         />
       </div>
-      <p className="mt-1.5 text-[10px] leading-4 text-muted-foreground/60">
+      <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/60">
         The selected provider, model, reasoning level, and speed settings apply to this task only.
       </p>
     </div>

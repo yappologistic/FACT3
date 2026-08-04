@@ -173,6 +173,14 @@ export function classifyKanbanThread(thread: EnvironmentThreadShell, now: string
   return "review";
 }
 
+export function isKanbanThreadVerified(
+  thread: Pick<EnvironmentThreadShell, "automation">,
+): boolean {
+  return (
+    thread.automation?.stage === "review" && thread.automation.verification.status === "passed"
+  );
+}
+
 export function sortKanbanThreads(
   threads: ReadonlyArray<EnvironmentThreadShell>,
 ): EnvironmentThreadShell[] {
@@ -219,7 +227,7 @@ export function describeKanbanThreadState(
       case "needs-input":
         return "Needs input";
       case "review":
-        return "Ready for review";
+        return isKanbanThreadVerified(thread) ? "Verified · ready for review" : "Ready for review";
       case "complete":
         return "Complete";
       case "failed":
@@ -240,7 +248,7 @@ export function describeKanbanThreadState(
     return "Needs attention";
   }
   if (thread.latestTurn?.state === "interrupted") return "Interrupted";
-  return "Ready for review";
+  return "Awaiting review";
 }
 
 export function describeEmptyKanbanActivity(

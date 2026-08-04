@@ -203,7 +203,7 @@ export const ChatHeader = memo(function ChatHeader({
             <WorkspaceToolbarActionButton
               type="button"
               emphasized
-              className="[-webkit-app-region:no-drag]"
+              className="text-[12px] sm:h-7 sm:text-[12px] [-webkit-app-region:no-drag]"
               onClick={onNewTask}
             >
               <ListPlusIcon aria-hidden className="size-3.5" />
@@ -212,10 +212,14 @@ export const ChatHeader = memo(function ChatHeader({
             <WorkspaceToolbarActionButton
               type="button"
               selected={kanbanHistoryOpen}
-              className="[-webkit-app-region:no-drag]"
+              className="text-[12px] sm:h-7 sm:text-[12px] [-webkit-app-region:no-drag]"
               onClick={() => onKanbanHistoryOpenChange(!kanbanHistoryOpen)}
             >
-              <HistoryIcon aria-hidden className="size-3.5" />
+              {kanbanHistoryOpen ? (
+                <LayoutDashboardIcon aria-hidden className="size-3.5" />
+              ) : (
+                <HistoryIcon aria-hidden className="size-3.5" />
+              )}
               <span className="hidden @3xl/header-actions:inline">
                 {kanbanHistoryOpen ? "Active board" : "History"}
               </span>

@@ -11,6 +11,7 @@ import {
   firstUserGoal,
   groupKanbanThreads,
   incompleteAutomationDependencies,
+  isKanbanThreadVerified,
   latestCheckpointSummary,
   liveKanbanAutomation,
   parseAutomationPlan,
@@ -149,6 +150,29 @@ describe("Kanban board lifecycle", () => {
     expect(classifyKanbanThread(needsInput, NOW)).toBe("attention");
     expect(classifyKanbanThread(review, NOW)).toBe("review");
     expect(describeKanbanThreadState(queued)).toBe("Queued");
+  });
+
+  it("only calls review work verified when verification evidence passed", () => {
+    const legacy = thread({ id: ThreadId.make("legacy-review") });
+    const unverified = thread({
+      id: ThreadId.make("unverified-review"),
+      automation: { ...automation(), stage: "review" },
+    });
+    const verified = thread({
+      id: ThreadId.make("verified-review"),
+      automation: {
+        ...automation(),
+        stage: "review",
+        verification: { status: "passed", summary: "Focused tests passed.", completedAt: NOW },
+      },
+    });
+
+    expect(isKanbanThreadVerified(legacy)).toBe(false);
+    expect(isKanbanThreadVerified(unverified)).toBe(false);
+    expect(isKanbanThreadVerified(verified)).toBe(true);
+    expect(describeKanbanThreadState(legacy)).toBe("Awaiting review");
+    expect(describeKanbanThreadState(unverified)).toBe("Ready for review");
+    expect(describeKanbanThreadState(verified)).toBe("Verified · ready for review");
   });
 
   it("keeps a queued task blocked until all configured dependencies complete", () => {
