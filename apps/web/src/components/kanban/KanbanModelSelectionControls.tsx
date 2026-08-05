@@ -119,7 +119,7 @@ export function KanbanModelSelectionControls(props: {
           }
         />
       </div>
-      <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/68">
+      <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/72">
         {props.helpText ??
           "The selected provider, model, reasoning level, and speed settings apply to this task only."}
       </p>

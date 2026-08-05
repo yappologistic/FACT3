@@ -6,6 +6,7 @@ import {
   automationConflictBlockers,
   capCompletedKanbanThreads,
   classifyKanbanThread,
+  compactKanbanLaneEmptyLabel,
   describeEmptyKanbanActivity,
   describeKanbanThreadState,
   firstUserGoal,
@@ -14,6 +15,7 @@ import {
   isAutomaticWorkflowCoordinator,
   isKanbanReviewDeliveryReady,
   isKanbanThreadVerified,
+  kanbanInspectorSectionOrder,
   latestCheckpointSummary,
   liveKanbanAutomation,
   parseAutomationPlan,
@@ -499,6 +501,47 @@ describe("Kanban board summaries", () => {
       "Waiting for Autopilot to start this task.",
     );
     expect(describeEmptyKanbanActivity(undefined)).toBe("No activity has been recorded yet.");
+  });
+
+  it("uses distinct compact empty states for each lane", () => {
+    expect(
+      ["queue", "running", "attention", "review", "complete"].map((lane) =>
+        compactKanbanLaneEmptyLabel(
+          lane as "queue" | "running" | "attention" | "review" | "complete",
+        ),
+      ),
+    ).toEqual([
+      "No queued tasks",
+      "No agents running",
+      "No blockers",
+      "Nothing awaiting review",
+      "Nothing completed yet",
+    ]);
+  });
+
+  it("orders inspector information around the task's current decision", () => {
+    expect(kanbanInspectorSectionOrder("running", "implementation")).toEqual([
+      "activity",
+      "run",
+      "goal",
+    ]);
+    expect(kanbanInspectorSectionOrder("review", "planning")).toEqual([
+      "plan",
+      "run",
+      "goal",
+      "activity",
+    ]);
+    expect(kanbanInspectorSectionOrder("failed", "implementation")).toEqual([
+      "run",
+      "activity",
+      "goal",
+    ]);
+    expect(kanbanInspectorSectionOrder("ready", "planning")).toEqual([
+      "goal",
+      "plan",
+      "run",
+      "activity",
+    ]);
   });
 
   it("turns Git setup failures into clear recovery guidance", () => {

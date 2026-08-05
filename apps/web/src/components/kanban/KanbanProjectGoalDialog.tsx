@@ -34,6 +34,7 @@ import {
   KanbanModelSelectionControls,
   resolveKanbanModelSelection,
 } from "./KanbanModelSelectionControls";
+import { KanbanBranchValidationMessage, useKanbanBranchValidation } from "./KanbanBranchValidation";
 
 type ConfigurableWorkflowRole = Exclude<keyof OrchestrationAutonomousWorkflowRoles, "orchestrator">;
 type WorkflowRoleOverrides = Partial<
@@ -98,7 +99,7 @@ function RequiredLabel(props: { readonly htmlFor: string; readonly children: str
       className="mb-1.5 flex w-full items-center justify-between text-[12px] font-medium leading-4 text-foreground/78"
     >
       <span>{props.children}</span>
-      <span className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground/62">
+      <span className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground/72">
         Required
       </span>
     </Label>
@@ -130,6 +131,7 @@ export function KanbanProjectGoalDialog(props: {
   );
   const [roleOverrides, setRoleOverrides] = useState<WorkflowRoleOverrides>({});
   const [submitting, setSubmitting] = useState(false);
+  const branchValidation = useKanbanBranchValidation(props.project, baseBranch);
   const policy = props.project.automationPolicy ?? DEFAULT_AUTOMATION_POLICY;
   const workflowRoles = useMemo(
     () => (orchestrator ? resolveWorkflowRoles(orchestrator, roleOverrides) : null),
@@ -137,7 +139,7 @@ export function KanbanProjectGoalDialog(props: {
   );
   const customRoleCount = Object.keys(roleOverrides).length;
   const canSubmit =
-    workflowRoles !== null && goal.trim().length > 0 && baseBranch.trim().length > 0 && !submitting;
+    workflowRoles !== null && goal.trim().length > 0 && branchValidation.canContinue && !submitting;
 
   const setCustomRole = (role: ConfigurableWorkflowRole, selection: ModelSelection | null) => {
     setRoleOverrides((current) => {
@@ -306,10 +308,12 @@ export function KanbanProjectGoalDialog(props: {
               required
               value={baseBranch}
               onChange={(event) => setBaseBranch(event.target.value)}
+              aria-describedby="kanban-workflow-base-branch-status"
             />
-            <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/68">
-              Worktrees branch from here and verified changes integrate back into this branch.
-            </p>
+            <KanbanBranchValidationMessage
+              id="kanban-workflow-base-branch-status"
+              validation={branchValidation}
+            />
           </div>
 
           <div>
@@ -338,7 +342,7 @@ export function KanbanProjectGoalDialog(props: {
                   <span className="block text-[12px] font-medium text-foreground/84">
                     Review checkpoints
                   </span>
-                  <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground/68">
+                  <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground/74">
                     Pause after planning and before final integration.
                   </span>
                 </span>
@@ -356,7 +360,7 @@ export function KanbanProjectGoalDialog(props: {
                   <span className="block text-[12px] font-medium text-foreground/84">
                     Fully autonomous
                   </span>
-                  <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground/68">
+                  <span className="mt-0.5 block text-[11px] leading-4 text-muted-foreground/74">
                     Continue through verified integration without routine review.
                   </span>
                 </span>
@@ -379,11 +383,11 @@ export function KanbanProjectGoalDialog(props: {
               <span className="flex items-center gap-2">
                 <ChevronRightIcon
                   aria-hidden
-                  className="size-3.5 text-muted-foreground/55 transition-transform duration-150 group-open:rotate-90 motion-reduce:transition-none"
+                  className="size-3.5 text-muted-foreground/68 transition-transform duration-150 group-open:rotate-90 motion-reduce:transition-none"
                 />
                 Customize agent roles
               </span>
-              <span className="text-[11px] font-normal text-muted-foreground/62">
+              <span className="text-[11px] font-normal text-muted-foreground/72">
                 {customRoleCount > 0
                   ? `${customRoleCount} ${customRoleCount === 1 ? "override" : "overrides"}`
                   : "Inherits by default"}
@@ -399,7 +403,7 @@ export function KanbanProjectGoalDialog(props: {
                         <p className="text-[12px] font-medium text-foreground/84">
                           {definition.label}
                         </p>
-                        <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground/65">
+                        <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground/72">
                           {definition.description}
                         </p>
                       </div>
@@ -437,7 +441,7 @@ export function KanbanProjectGoalDialog(props: {
             </div>
           </details>
 
-          <p className="border-t border-foreground/[0.065] pt-3 text-[11px] leading-4 text-muted-foreground/70">
+          <p className="border-t border-foreground/[0.065] pt-3 text-[11px] leading-4 text-muted-foreground/76">
             {mode === "automatic"
               ? "Fully autonomous continues through verified integration; permissions and unresolved decisions still pause it."
               : "Review checkpoints pause after planning and before final integration so you decide what ships."}{" "}
@@ -449,12 +453,12 @@ export function KanbanProjectGoalDialog(props: {
             Cancel
           </Button>
           <Button
-            className="disabled:bg-foreground/[0.06] disabled:text-muted-foreground/55 disabled:opacity-100"
+            className="disabled:bg-foreground/[0.06] disabled:text-muted-foreground/60 disabled:opacity-100"
             onClick={() => void submit()}
             disabled={!canSubmit}
           >
             {submitting ? <OpenTuiSpinner name="dots" /> : <WorkflowIcon aria-hidden />}
-            Start workflow
+            {mode === "automatic" ? "Start and auto-integrate" : "Start with checkpoints"}
           </Button>
         </DialogFooter>
       </DialogPopup>

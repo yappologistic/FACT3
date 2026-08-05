@@ -9,6 +9,7 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import { ChevronRightIcon } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { projectEnvironment } from "~/state/projects";
@@ -43,6 +44,7 @@ import {
   KanbanModelSelectionControls,
   resolveKanbanModelSelection,
 } from "./KanbanModelSelectionControls";
+import { KanbanBranchValidationMessage, useKanbanBranchValidation } from "./KanbanBranchValidation";
 
 export const DEFAULT_AUTOMATION_POLICY: OrchestrationProjectAutomationPolicy = {
   enabled: false,
@@ -78,7 +80,7 @@ function FieldLabel(props: {
     >
       <span>{props.children}</span>
       {props.required ? (
-        <span className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground/62">
+        <span className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground/72">
           Required
         </span>
       ) : null}
@@ -119,6 +121,7 @@ export function KanbanNewTaskDialog(props: {
       DEFAULT_AUTOMATION_POLICY.defaultMaxRuntimeMinutes,
   );
   const [submitting, setSubmitting] = useState(false);
+  const branchValidation = useKanbanBranchValidation(props.project, baseBranch);
   const dependencyOptions = useMemo(
     () =>
       props.threads.filter(
@@ -130,7 +133,7 @@ export function KanbanNewTaskDialog(props: {
     modelSelection !== null &&
     title.trim().length > 0 &&
     goal.trim().length > 0 &&
-    baseBranch.trim().length > 0 &&
+    branchValidation.canContinue &&
     !submitting;
 
   const reset = () => {
@@ -298,7 +301,7 @@ export function KanbanNewTaskDialog(props: {
                 className="min-h-20"
               />
             </div>
-            <p className="text-[12px] leading-4 text-muted-foreground/62">
+            <p className="text-[12px] leading-4 text-muted-foreground/72">
               Task name and goal are required. Acceptance criteria are optional.
             </p>
           </div>
@@ -311,35 +314,47 @@ export function KanbanNewTaskDialog(props: {
           />
 
           {dependencyOptions.length > 0 ? (
-            <fieldset>
-              <legend className="mb-1.5 text-[12px] font-medium leading-4 text-foreground/78">
-                Wait for
-              </legend>
-              <div className="max-h-32 space-y-0.5 overflow-y-auto rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] p-1.5">
-                {dependencyOptions.map((thread) => {
-                  const checked = dependencies.has(thread.id);
-                  return (
-                    <label
-                      key={thread.id}
-                      className="flex cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-[12px] leading-4 text-foreground/80 transition-colors hover:bg-foreground/[0.045]"
-                    >
-                      <Checkbox
-                        checked={checked}
-                        onCheckedChange={(nextChecked) =>
-                          setDependencies((current) => {
-                            const next = new Set(current);
-                            if (nextChecked) next.add(thread.id);
-                            else next.delete(thread.id);
-                            return next;
-                          })
-                        }
-                      />
-                      <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-                    </label>
-                  );
-                })}
-              </div>
-            </fieldset>
+            <details className="group rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3">
+              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 rounded-[8px] text-[12px] font-medium leading-4 text-foreground/82 outline-none focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                <span className="flex items-center gap-2">
+                  <ChevronRightIcon
+                    aria-hidden
+                    className="size-3 text-muted-foreground/72 transition-transform duration-150 group-open:rotate-90 motion-reduce:transition-none"
+                  />
+                  Wait for
+                </span>
+                <span className="text-[11px] font-normal text-muted-foreground/72">
+                  {dependencies.size > 0 ? `${dependencies.size} selected` : "Optional"}
+                </span>
+              </summary>
+              <fieldset className="mt-2.5">
+                <legend className="sr-only">Tasks that must finish first</legend>
+                <div className="max-h-40 space-y-0.5 overflow-y-auto border-t border-foreground/[0.06] pt-2">
+                  {dependencyOptions.map((thread) => {
+                    const checked = dependencies.has(thread.id);
+                    return (
+                      <label
+                        key={thread.id}
+                        className="flex cursor-pointer items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-[12px] leading-4 text-foreground/82 transition-colors hover:bg-foreground/[0.045]"
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(nextChecked) =>
+                            setDependencies((current) => {
+                              const next = new Set(current);
+                              if (nextChecked) next.add(thread.id);
+                              else next.delete(thread.id);
+                              return next;
+                            })
+                          }
+                        />
+                        <span className="min-w-0 flex-1 truncate">{thread.title}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
+            </details>
           ) : null}
 
           <details className="group rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3">
@@ -353,6 +368,11 @@ export function KanbanNewTaskDialog(props: {
                   id="kanban-task-base-branch"
                   value={baseBranch}
                   onChange={(event) => setBaseBranch(event.target.value)}
+                  aria-describedby="kanban-task-base-branch-status"
+                />
+                <KanbanBranchValidationMessage
+                  id="kanban-task-base-branch-status"
+                  validation={branchValidation}
                 />
               </div>
               <div className="sm:col-span-3">
@@ -366,7 +386,7 @@ export function KanbanNewTaskDialog(props: {
                   }
                   className="min-h-16"
                 />
-                <p className="mt-1 text-[11px] leading-4 text-muted-foreground/62">
+                <p className="mt-1 text-[11px] leading-4 text-muted-foreground/72">
                   Autopilot keeps overlapping paths out of the same parallel run.
                 </p>
               </div>
@@ -403,7 +423,7 @@ export function KanbanNewTaskDialog(props: {
             </div>
           </details>
 
-          <p className="border-t border-foreground/[0.055] pt-3 text-[12px] leading-4 text-muted-foreground/68">
+          <p className="border-t border-foreground/[0.055] pt-3 text-[12px] leading-4 text-muted-foreground/76">
             Runs with full access. Provider approval and user-input requests still stop in Needs
             attention.
           </p>
@@ -412,7 +432,11 @@ export function KanbanNewTaskDialog(props: {
           <Button variant="ghost" onClick={() => props.onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={() => void submit()} disabled={!canSubmit}>
+          <Button
+            className="disabled:bg-foreground/[0.06] disabled:text-muted-foreground/60 disabled:opacity-100"
+            onClick={() => void submit()}
+            disabled={!canSubmit}
+          >
             {submitting ? <OpenTuiSpinner name="dots" /> : null}
             Create task
           </Button>
@@ -432,7 +456,7 @@ function PolicyToggle(props: {
     <label className="flex items-center justify-between gap-4 rounded-[14px] border border-foreground/[0.07] bg-foreground/[0.018] px-3.5 py-3">
       <span>
         <span className="block text-[12px] font-medium text-foreground/84">{props.label}</span>
-        <span className="mt-0.5 block text-[12px] leading-4 text-muted-foreground/68">
+        <span className="mt-0.5 block text-[12px] leading-4 text-muted-foreground/76">
           {props.description}
         </span>
       </span>
@@ -453,6 +477,17 @@ export function KanbanAutomationSettingsDialog(props: {
     props.project.automationPolicy ?? DEFAULT_AUTOMATION_POLICY,
   );
   const [saving, setSaving] = useState(false);
+  const persistedPolicy = props.project.automationPolicy ?? DEFAULT_AUTOMATION_POLICY;
+  const hasChanges =
+    policy.enabled !== persistedPolicy.enabled ||
+    policy.maxConcurrentRuns !== persistedPolicy.maxConcurrentRuns ||
+    policy.defaultMaxAttempts !== persistedPolicy.defaultMaxAttempts ||
+    policy.defaultMaxRuntimeMinutes !== persistedPolicy.defaultMaxRuntimeMinutes ||
+    policy.stuckAfterMinutes !== persistedPolicy.stuckAfterMinutes ||
+    policy.createWorktrees !== persistedPolicy.createWorktrees ||
+    policy.requireVerification !== persistedPolicy.requireVerification ||
+    policy.requireReview !== persistedPolicy.requireReview ||
+    policy.deliveryMode !== persistedPolicy.deliveryMode;
 
   const save = async () => {
     setSaving(true);
@@ -465,6 +500,11 @@ export function KanbanAutomationSettingsDialog(props: {
       commandError("Could not save Autopilot settings", "No settings were changed. Try again.");
       return;
     }
+    toastManager.add({
+      type: "success",
+      title: "Autopilot settings saved",
+      description: "New autonomous runs will use these limits and delivery rules.",
+    });
     props.onOpenChange(false);
   };
 
@@ -605,7 +645,11 @@ export function KanbanAutomationSettingsDialog(props: {
           <Button variant="ghost" onClick={() => props.onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
-          <Button onClick={() => void save()} disabled={saving}>
+          <Button
+            className="disabled:bg-foreground/[0.06] disabled:text-muted-foreground/60 disabled:opacity-100"
+            onClick={() => void save()}
+            disabled={saving || !hasChanges}
+          >
             {saving ? <OpenTuiSpinner name="dots" /> : null}
             Save settings
           </Button>

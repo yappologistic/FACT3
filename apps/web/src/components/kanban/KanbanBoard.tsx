@@ -34,7 +34,7 @@ import {
   XCircleIcon,
   XIcon,
 } from "lucide-react";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import GitActionsControl from "~/components/GitActionsControl";
 import {
@@ -80,6 +80,7 @@ import {
   automationConflictBlockers,
   capCompletedKanbanThreads,
   classifyKanbanThread,
+  compactKanbanLaneEmptyLabel,
   describeKanbanThreadState,
   describeEmptyKanbanActivity,
   firstUserGoal,
@@ -88,12 +89,14 @@ import {
   isAutomaticWorkflowCoordinator,
   isKanbanThreadVerified,
   isKanbanReviewDeliveryReady,
+  kanbanInspectorSectionOrder,
   liveKanbanAutomation,
   parseAutomationPlan,
   presentKanbanAutomationError,
   sortKanbanThreads,
   type AutomationPlanTask,
   type KanbanActiveLane,
+  type KanbanInspectorSection,
 } from "./KanbanBoard.logic";
 import { OpenTuiSpinner } from "./OpenTuiSpinner";
 
@@ -346,7 +349,7 @@ function LaneEmptyState({ lane }: { readonly lane: KanbanActiveLane }) {
       <p className="text-[12px] font-medium text-foreground/70">
         Nothing in {copy.label.toLowerCase()}
       </p>
-      <p className="mt-1 max-w-48 text-[12px] leading-4 text-muted-foreground/60">
+      <p className="mt-1 max-w-48 text-[12px] leading-4 text-muted-foreground/68">
         {copy.description}
       </p>
     </div>
@@ -390,8 +393,8 @@ const KanbanLaneColumn = memo(function KanbanLaneColumn(props: {
         <div className="space-y-2.5 pb-4">
           {props.threads.length === 0 ? (
             props.compact ? (
-              <p className="px-1 py-3 text-[11px] leading-4 text-muted-foreground/55">
-                {props.lane === "attention" ? "No blockers" : "No work here"}
+              <p className="px-1 py-3 text-[11px] leading-4 text-muted-foreground/68">
+                {compactKanbanLaneEmptyLabel(props.lane)}
               </p>
             ) : (
               <LaneEmptyState lane={props.lane} />
@@ -495,7 +498,7 @@ function KanbanSubagentsSection(props: {
           >
             Sub-agents
           </span>
-          <span className="mt-0.5 block text-[11px] text-muted-foreground/62">
+          <span className="mt-0.5 block text-[11px] text-muted-foreground/72">
             {anyRunning ? "Working in parallel" : "Work completed"}
           </span>
         </span>
@@ -556,7 +559,7 @@ function KanbanSubagentsSection(props: {
                       {subagent.name}
                     </span>
                     {subagent.model || subagent.reasoningEffort ? (
-                      <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/62">
+                      <span className="mt-0.5 block truncate text-[11px] text-muted-foreground/72">
                         {[
                           subagent.model ? compactModelLabel(subagent.model) : null,
                           subagent.reasoningEffort,
@@ -1166,9 +1169,356 @@ function KanbanInspector(props: {
         ? { label: "Reopen", Icon: RotateCcwIcon }
         : { label: "Mark complete", Icon: CheckCircle2Icon };
 
+  const goalSection = (
+    <section
+      key="goal"
+      aria-labelledby="kanban-goal-heading"
+      className="border-t border-foreground/[0.07] pt-4"
+    >
+      <h3 id="kanban-goal-heading" className="text-[12px] font-medium text-foreground/82">
+        Goal
+      </h3>
+      <p className="mt-2 text-[12px] leading-5 text-muted-foreground/82">
+        {goal ?? "Open the task to add a clear implementation goal."}
+      </p>
+      {automation && automation.acceptanceCriteria.length > 0 ? (
+        <ul className="mt-2.5 space-y-1.5">
+          {automation.acceptanceCriteria.map((criterion) => (
+            <li
+              key={criterion}
+              className="flex gap-2 text-[12px] leading-4 text-muted-foreground/76"
+            >
+              <CircleIcon aria-hidden className="mt-1 size-2 shrink-0" />
+              <span>{criterion}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </section>
+  );
+
+  const planSection =
+    automation?.taskKind === "planning" ? (
+      <section
+        key="plan"
+        aria-labelledby="kanban-plan-heading"
+        className="border-t border-foreground/[0.07] pt-4"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <h3 id="kanban-plan-heading" className="text-[12px] font-medium text-foreground/82">
+            Proposed execution
+          </h3>
+          {proposedExecution ? (
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {proposedExecution.tasks.length + (workflowConfig ? 1 : 0)} tasks
+            </span>
+          ) : null}
+        </div>
+        {proposedExecution ? (
+          <>
+            <p className="mt-2 text-[11px] leading-4 text-muted-foreground/76">
+              <span className="font-medium text-foreground/76">Plan summary:</span>{" "}
+              {proposedExecution.summary}
+            </p>
+            <ol className="mt-3 divide-y divide-foreground/[0.06] border-y border-foreground/[0.06]">
+              {proposedExecution.tasks.map((task, index) => {
+                const selection = proposedModelSelections[index];
+                const modelAvailable = selection !== null;
+                return (
+                  <li key={task.key} className="py-3">
+                    <div className="flex items-start gap-2.5">
+                      <span className="w-5 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-muted-foreground/60">
+                        {String(index + 1).padStart(2, "0")}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[12px] font-medium leading-4 text-foreground/84">
+                          {task.title}
+                        </p>
+                        <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground/74">
+                          <span
+                            className={cn(
+                              "font-medium",
+                              modelAvailable ? "text-foreground/72" : "text-destructive",
+                            )}
+                          >
+                            {AUTOMATION_ROLE_LABELS[task.role]} ·{" "}
+                            {compactModelLabel(selection?.model ?? task.model ?? "Unavailable")}
+                          </span>
+                          {task.dependsOn.length > 0 ? (
+                            <span>after {task.dependsOn.join(", ")}</span>
+                          ) : (
+                            <span>can start immediately</span>
+                          )}
+                        </div>
+                        <p className="mt-1.5 break-words font-mono text-[11px] leading-4 text-muted-foreground/72">
+                          {task.changeScopes.join(" · ")}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                );
+              })}
+              {workflowConfig ? (
+                <li className="py-3">
+                  <div className="flex items-start gap-2.5">
+                    <span className="w-5 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-muted-foreground/60">
+                      {String(proposedExecution.tasks.length + 1).padStart(2, "0")}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[12px] font-medium leading-4 text-foreground/84">
+                        Integrate autonomous workflow
+                      </p>
+                      <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground/74">
+                        <span
+                          className={cn(
+                            "font-medium",
+                            proposedIntegratorModelSelection
+                              ? "text-foreground/72"
+                              : "text-destructive",
+                          )}
+                        >
+                          Integrator ·{" "}
+                          {compactModelLabel(
+                            proposedIntegratorModelSelection?.model ??
+                              workflowConfig.roles.integrator.model,
+                          )}
+                        </span>
+                        <span>after every planned task</span>
+                      </div>
+                      <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/72">
+                        Resolves conflicts and verifies the combined result on the base branch.
+                      </p>
+                    </div>
+                  </div>
+                </li>
+              ) : null}
+            </ol>
+            {proposedModelSelections.some((selection) => selection === null) ||
+            (workflowConfig !== null && proposedIntegratorModelSelection === null) ? (
+              <p className="mt-2.5 rounded-[12px] border border-destructive/15 bg-destructive/[0.035] px-3 py-2 text-[11px] leading-4 text-destructive">
+                A configured role model is no longer available in this environment. Open chat to
+                revise the workflow or start a new one with an enabled model.
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="mt-2 text-[12px] leading-4 text-muted-foreground/72">
+            {automation.stage === "running" || automation.stage === "ready"
+              ? "The planning agent is inspecting the repository. Its task graph will appear here for approval."
+              : "No valid structured plan was found. Open the planning response to inspect or revise it."}
+          </p>
+        )}
+      </section>
+    ) : null;
+
+  const runSection = automation ? (
+    <section
+      key="run"
+      aria-labelledby="kanban-run-heading"
+      className="border-t border-foreground/[0.07] pt-4"
+    >
+      <h3 id="kanban-run-heading" className="text-[12px] font-medium text-foreground/82">
+        Autonomous run
+      </h3>
+      <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
+        <dt className="text-muted-foreground/72">State</dt>
+        <dd
+          className={cn(
+            "text-foreground/82",
+            automation.stage === "complete" && "text-success",
+            automation.stage === "failed" && "text-destructive",
+          )}
+        >
+          {stateLabelForThread(props.threadShell, props.allThreads)}
+        </dd>
+        {automation.workflowId ? (
+          <>
+            <dt className="text-muted-foreground/72">Role</dt>
+            <dd className="text-foreground/82">{AUTOMATION_ROLE_LABELS[automation.role]}</dd>
+          </>
+        ) : null}
+        <dt className="text-muted-foreground/72">Attempt</dt>
+        <dd className="text-foreground/82">
+          {automation.attempt} of {automation.maxAttempts}
+        </dd>
+        <dt className="text-muted-foreground/72">Verification</dt>
+        <dd
+          className={cn(
+            "capitalize text-foreground/82",
+            automation.verification.status === "passed" && "text-success",
+            automation.verification.status === "failed" && "text-destructive",
+          )}
+        >
+          {automation.verification.status}
+        </dd>
+      </dl>
+      {automation.dependencies.length > 0 ? (
+        <div className="mt-3">
+          <p className="text-[11px] text-muted-foreground/72">Dependencies</p>
+          <div className="mt-1.5 space-y-1.5">
+            {automation.dependencies.map((dependencyId) => {
+              const dependency = dependencyById.get(dependencyId);
+              const pending = blockedDependencies.some(
+                (candidate) => candidate.id === dependencyId,
+              );
+              return (
+                <div
+                  key={dependencyId}
+                  className="flex items-center gap-2 text-[12px] text-muted-foreground/82"
+                >
+                  {pending ? (
+                    <CircleIcon aria-hidden className="size-3 text-muted-foreground/60" />
+                  ) : (
+                    <CheckCircle2Icon aria-hidden className="size-3 text-success" />
+                  )}
+                  <span className="truncate">{dependency?.title ?? "Unavailable task"}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+      {automation.changeScopes.length > 0 ? (
+        <div className="mt-3">
+          <p className="text-[11px] text-muted-foreground/72">Change scope</p>
+          <p className="mt-1.5 truncate font-mono text-[11px] text-muted-foreground/78">
+            {automation.changeScopes.join(" · ")}
+          </p>
+          {conflictBlockers.length > 0 ? (
+            <p className="mt-1.5 text-[11px] leading-4 text-warning">
+              Waiting for {conflictBlockers.map((item) => item.title).join(", ")} to leave these
+              paths.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      {automationError ? (
+        <div
+          role="alert"
+          className="mt-3 rounded-[14px] border border-destructive/15 bg-destructive/[0.035] px-3 py-2.5"
+        >
+          <p className="text-[12px] font-medium leading-4 text-destructive-foreground/88">
+            {automationError.title}
+          </p>
+          <p className="mt-1 text-[11px] leading-4 text-destructive-foreground/76">
+            {automationError.detail}
+          </p>
+          {automationError.recovery ? (
+            <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/78">
+              {automationError.recovery}
+            </p>
+          ) : null}
+        </div>
+      ) : automation.verification.evidence.length > 0 ? (
+        <div className="mt-3 rounded-[12px] border border-foreground/[0.065] bg-foreground/[0.018] px-3 py-2.5">
+          <div className="flex items-center gap-1.5">
+            {automation.verification.status === "passed" ? (
+              <CheckCircle2Icon aria-hidden className="size-3 text-success" />
+            ) : null}
+            <p className="text-[11px] font-medium text-foreground/78">Verification evidence</p>
+          </div>
+          {automation.verification.summary ? (
+            <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/76">
+              {automation.verification.summary}
+            </p>
+          ) : null}
+          <ul className="mt-2.5 space-y-2">
+            {automation.verification.evidence.slice(0, 4).map((evidence) => (
+              <li key={`${evidence.check}:${evidence.detail}`} className="text-[11px] leading-4">
+                <p className="font-medium text-foreground/78">{evidence.check}</p>
+                <p className="mt-0.5 text-muted-foreground/76">{evidence.detail}</p>
+              </li>
+            ))}
+          </ul>
+          {automation.verification.evidence.length > 4 ? (
+            <p className="mt-2 text-[10px] text-muted-foreground/68">
+              +{automation.verification.evidence.length - 4} more checks in chat
+            </p>
+          ) : null}
+        </div>
+      ) : automation.verification.summary ? (
+        <div className="mt-3">
+          <p className="text-[11px] font-medium text-foreground/72">Verification summary</p>
+          <p className="mt-1 text-[11px] leading-4 text-muted-foreground/76">
+            {automation.verification.summary}
+          </p>
+        </div>
+      ) : null}
+    </section>
+  ) : null;
+
+  const activitySection = (
+    <section
+      key="activity"
+      aria-labelledby="kanban-progress-heading"
+      className="border-t border-foreground/[0.07] pt-4"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <h3 id="kanban-progress-heading" className="text-[12px] font-medium text-foreground/82">
+          {automation?.stage === "complete" ||
+          automation?.stage === "failed" ||
+          automation?.stage === "cancelled"
+            ? "Recent activity"
+            : "Live activity"}
+        </h3>
+        {details.tasks.length > 0 ? (
+          <span className="text-[11px] tabular-nums text-muted-foreground">
+            {details.tasks.filter((item) => item.status === "completed").length}/
+            {details.tasks.length}
+          </span>
+        ) : null}
+      </div>
+      <div className="mt-2.5 space-y-2">
+        {details.tasks.length > 0 ? (
+          details.tasks.slice(0, 6).map((task) => (
+            <div
+              key={task.id}
+              className="flex items-start gap-2 text-[12px] leading-4 text-muted-foreground"
+            >
+              <StatusDot status={task.status} />
+              <span
+                className={cn(
+                  "min-w-0 flex-1",
+                  task.status === "completed" && "text-muted-foreground/76",
+                )}
+              >
+                {task.title}
+              </span>
+            </div>
+          ))
+        ) : details.tools.length > 0 ? (
+          details.tools.slice(0, 4).map((tool) => (
+            <div
+              key={tool.id}
+              className="flex items-start gap-2 text-[12px] leading-4 text-muted-foreground"
+            >
+              <StatusDot status={tool.status} />
+              <span className="min-w-0 flex-1">{tool.title}</span>
+            </div>
+          ))
+        ) : (
+          <p className="text-[12px] text-muted-foreground/72">
+            {describeEmptyKanbanActivity(automation)}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+
+  const inspectorSections: Record<KanbanInspectorSection, ReactNode> = {
+    goal: goalSection,
+    plan: planSection,
+    run: runSection,
+    activity: activitySection,
+  };
+  const inspectorSectionOrder = kanbanInspectorSectionOrder(
+    automation?.stage,
+    automation?.taskKind,
+  );
+
   return (
     <>
-      <aside className="absolute inset-y-0 right-0 z-30 flex min-h-0 w-[min(27rem,calc(100%-1rem))] shrink-0 animate-in flex-col border-l border-foreground/[0.07] bg-background/96 shadow-[-16px_0_40px_rgba(0,0,0,0.16)] backdrop-blur-xl duration-200 slide-in-from-right-2 motion-reduce:animate-none min-[1600px]:static min-[1600px]:w-[27rem] min-[1600px]:bg-background/72 min-[1600px]:shadow-none">
+      <aside className="absolute inset-y-0 right-0 z-30 flex min-h-0 w-[min(30rem,calc(100%-1rem))] shrink-0 animate-in flex-col border-l border-foreground/[0.07] bg-background/96 shadow-[-16px_0_40px_rgba(0,0,0,0.16)] backdrop-blur-xl duration-200 slide-in-from-right-2 motion-reduce:animate-none min-[1600px]:static min-[1600px]:w-[30rem] min-[1600px]:bg-background/72 min-[1600px]:shadow-none">
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-5 p-6">
             <header>
@@ -1202,353 +1552,7 @@ function KanbanInspector(props: {
               </div>
             </header>
 
-            <section
-              aria-labelledby="kanban-goal-heading"
-              className="border-t border-foreground/[0.07] pt-4"
-            >
-              <h3 id="kanban-goal-heading" className="text-[12px] font-medium text-foreground/82">
-                Goal
-              </h3>
-              <p className="mt-2 text-[12px] leading-5 text-muted-foreground/82">
-                {goal ?? "Open the task to add a clear implementation goal."}
-              </p>
-              {automation && automation.acceptanceCriteria.length > 0 ? (
-                <ul className="mt-2.5 space-y-1.5">
-                  {automation.acceptanceCriteria.map((criterion) => (
-                    <li
-                      key={criterion}
-                      className="flex gap-2 text-[12px] leading-4 text-muted-foreground/76"
-                    >
-                      <CircleIcon aria-hidden className="mt-1 size-2 shrink-0" />
-                      <span>{criterion}</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </section>
-
-            {automation?.taskKind === "planning" ? (
-              <section
-                aria-labelledby="kanban-plan-heading"
-                className="border-t border-foreground/[0.07] pt-4"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <h3
-                    id="kanban-plan-heading"
-                    className="text-[12px] font-medium text-foreground/82"
-                  >
-                    Proposed execution
-                  </h3>
-                  {proposedExecution ? (
-                    <span className="text-[11px] tabular-nums text-muted-foreground">
-                      {proposedExecution.tasks.length + (workflowConfig ? 1 : 0)} tasks
-                    </span>
-                  ) : null}
-                </div>
-                {proposedExecution ? (
-                  <>
-                    <p className="mt-2 text-[11px] leading-4 text-muted-foreground/68">
-                      <span className="font-medium text-foreground/72">Plan summary:</span>{" "}
-                      {proposedExecution.summary}
-                    </p>
-                    <ol className="mt-3 divide-y divide-foreground/[0.06] border-y border-foreground/[0.06]">
-                      {proposedExecution.tasks.map((task, index) => {
-                        const selection = proposedModelSelections[index];
-                        const modelAvailable = selection !== null;
-                        return (
-                          <li key={task.key} className="py-3">
-                            <div className="flex items-start gap-2.5">
-                              <span className="w-5 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-muted-foreground/48">
-                                {String(index + 1).padStart(2, "0")}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <p className="text-[12px] font-medium leading-4 text-foreground/84">
-                                  {task.title}
-                                </p>
-                                <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground/68">
-                                  <span
-                                    className={cn(
-                                      "font-medium",
-                                      modelAvailable ? "text-foreground/68" : "text-destructive",
-                                    )}
-                                  >
-                                    {AUTOMATION_ROLE_LABELS[task.role]} ·{" "}
-                                    {compactModelLabel(
-                                      selection?.model ?? task.model ?? "Unavailable",
-                                    )}
-                                  </span>
-                                  {task.dependsOn.length > 0 ? (
-                                    <span>after {task.dependsOn.join(", ")}</span>
-                                  ) : (
-                                    <span>can start immediately</span>
-                                  )}
-                                </div>
-                                <p className="mt-1.5 break-words font-mono text-[11px] leading-4 text-muted-foreground/62">
-                                  {task.changeScopes.join(" · ")}
-                                </p>
-                              </div>
-                            </div>
-                          </li>
-                        );
-                      })}
-                      {workflowConfig ? (
-                        <li className="py-3">
-                          <div className="flex items-start gap-2.5">
-                            <span className="w-5 shrink-0 pt-0.5 text-right text-[10px] tabular-nums text-muted-foreground/48">
-                              {String(proposedExecution.tasks.length + 1).padStart(2, "0")}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-[12px] font-medium leading-4 text-foreground/84">
-                                Integrate autonomous workflow
-                              </p>
-                              <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] text-muted-foreground/68">
-                                <span
-                                  className={cn(
-                                    "font-medium",
-                                    proposedIntegratorModelSelection
-                                      ? "text-foreground/68"
-                                      : "text-destructive",
-                                  )}
-                                >
-                                  Integrator ·{" "}
-                                  {compactModelLabel(
-                                    proposedIntegratorModelSelection?.model ??
-                                      workflowConfig.roles.integrator.model,
-                                  )}
-                                </span>
-                                <span>after every planned task</span>
-                              </div>
-                              <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/62">
-                                Resolves conflicts and verifies the combined result on the base
-                                branch.
-                              </p>
-                            </div>
-                          </div>
-                        </li>
-                      ) : null}
-                    </ol>
-                    {proposedModelSelections.some((selection) => selection === null) ||
-                    (workflowConfig !== null && proposedIntegratorModelSelection === null) ? (
-                      <p className="mt-2.5 rounded-[12px] border border-destructive/15 bg-destructive/[0.035] px-3 py-2 text-[11px] leading-4 text-destructive">
-                        A configured role model is no longer available in this environment. Open
-                        chat to revise the workflow or start a new one with an enabled model.
-                      </p>
-                    ) : null}
-                  </>
-                ) : (
-                  <p className="mt-2 text-[12px] leading-4 text-muted-foreground/65">
-                    {automation.stage === "running" || automation.stage === "ready"
-                      ? "The planning agent is inspecting the repository. Its task graph will appear here for approval."
-                      : "No valid structured plan was found. Open the planning response to inspect or revise it."}
-                  </p>
-                )}
-              </section>
-            ) : null}
-
-            {automation ? (
-              <section
-                aria-labelledby="kanban-run-heading"
-                className="border-t border-foreground/[0.07] pt-4"
-              >
-                <h3 id="kanban-run-heading" className="text-[12px] font-medium text-foreground/82">
-                  Autonomous run
-                </h3>
-                <dl className="mt-2.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-[12px]">
-                  <dt className="text-muted-foreground/60">State</dt>
-                  <dd
-                    className={cn(
-                      "text-foreground/82",
-                      automation.stage === "complete" && "text-success",
-                      automation.stage === "failed" && "text-destructive",
-                    )}
-                  >
-                    {stateLabelForThread(props.threadShell, props.allThreads)}
-                  </dd>
-                  {automation.workflowId ? (
-                    <>
-                      <dt className="text-muted-foreground/60">Role</dt>
-                      <dd className="text-foreground/82">
-                        {AUTOMATION_ROLE_LABELS[automation.role]}
-                      </dd>
-                    </>
-                  ) : null}
-                  <dt className="text-muted-foreground/60">Attempt</dt>
-                  <dd className="text-foreground/82">
-                    {automation.attempt} of {automation.maxAttempts}
-                  </dd>
-                  <dt className="text-muted-foreground/60">Verification</dt>
-                  <dd
-                    className={cn(
-                      "capitalize text-foreground/82",
-                      automation.verification.status === "passed" && "text-success",
-                      automation.verification.status === "failed" && "text-destructive",
-                    )}
-                  >
-                    {automation.verification.status}
-                  </dd>
-                </dl>
-                {automation.dependencies.length > 0 ? (
-                  <div className="mt-3">
-                    <p className="text-[11px] text-muted-foreground/60">Dependencies</p>
-                    <div className="mt-1.5 space-y-1.5">
-                      {automation.dependencies.map((dependencyId) => {
-                        const dependency = dependencyById.get(dependencyId);
-                        const pending = blockedDependencies.some(
-                          (candidate) => candidate.id === dependencyId,
-                        );
-                        return (
-                          <div
-                            key={dependencyId}
-                            className="flex items-center gap-2 text-[12px] text-muted-foreground/82"
-                          >
-                            {pending ? (
-                              <CircleIcon aria-hidden className="size-3 text-muted-foreground/45" />
-                            ) : (
-                              <CheckCircle2Icon aria-hidden className="size-3 text-success" />
-                            )}
-                            <span className="truncate">
-                              {dependency?.title ?? "Unavailable task"}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : null}
-                {automation.changeScopes.length > 0 ? (
-                  <div className="mt-3">
-                    <p className="text-[11px] text-muted-foreground/60">Change scope</p>
-                    <p className="mt-1.5 truncate font-mono text-[11px] text-muted-foreground/75">
-                      {automation.changeScopes.join(" · ")}
-                    </p>
-                    {conflictBlockers.length > 0 ? (
-                      <p className="mt-1.5 text-[11px] leading-4 text-warning">
-                        Waiting for {conflictBlockers.map((item) => item.title).join(", ")} to leave
-                        these paths.
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-                {automationError ? (
-                  <div
-                    role="alert"
-                    className="mt-3 rounded-[14px] border border-destructive/15 bg-destructive/[0.035] px-3 py-2.5"
-                  >
-                    <p className="text-[12px] font-medium leading-4 text-destructive-foreground/88">
-                      {automationError.title}
-                    </p>
-                    <p className="mt-1 text-[11px] leading-4 text-destructive-foreground/72">
-                      {automationError.detail}
-                    </p>
-                    {automationError.recovery ? (
-                      <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/78">
-                        {automationError.recovery}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : automation.verification.evidence.length > 0 ? (
-                  <div className="mt-3 rounded-[12px] border border-foreground/[0.065] bg-foreground/[0.018] px-3 py-2.5">
-                    <div className="flex items-center gap-1.5">
-                      {automation.verification.status === "passed" ? (
-                        <CheckCircle2Icon aria-hidden className="size-3 text-success" />
-                      ) : null}
-                      <p className="text-[11px] font-medium text-foreground/78">
-                        Verification evidence
-                      </p>
-                    </div>
-                    {automation.verification.summary ? (
-                      <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground/70">
-                        {automation.verification.summary}
-                      </p>
-                    ) : null}
-                    <ul className="mt-2.5 space-y-2">
-                      {automation.verification.evidence.slice(0, 4).map((evidence) => (
-                        <li
-                          key={`${evidence.check}:${evidence.detail}`}
-                          className="text-[11px] leading-4"
-                        >
-                          <p className="font-medium text-foreground/78">{evidence.check}</p>
-                          <p className="mt-0.5 text-muted-foreground/70">{evidence.detail}</p>
-                        </li>
-                      ))}
-                    </ul>
-                    {automation.verification.evidence.length > 4 ? (
-                      <p className="mt-2 text-[10px] text-muted-foreground/55">
-                        +{automation.verification.evidence.length - 4} more checks in chat
-                      </p>
-                    ) : null}
-                  </div>
-                ) : automation.verification.summary ? (
-                  <div className="mt-3">
-                    <p className="text-[11px] font-medium text-foreground/72">
-                      Verification summary
-                    </p>
-                    <p className="mt-1 text-[11px] leading-4 text-muted-foreground/70">
-                      {automation.verification.summary}
-                    </p>
-                  </div>
-                ) : null}
-              </section>
-            ) : null}
-
-            <section
-              aria-labelledby="kanban-progress-heading"
-              className="border-t border-foreground/[0.07] pt-4"
-            >
-              <div className="flex items-center justify-between gap-3">
-                <h3
-                  id="kanban-progress-heading"
-                  className="text-[12px] font-medium text-foreground/82"
-                >
-                  {automation?.stage === "complete" ||
-                  automation?.stage === "failed" ||
-                  automation?.stage === "cancelled"
-                    ? "Recent activity"
-                    : "Live activity"}
-                </h3>
-                {details.tasks.length > 0 ? (
-                  <span className="text-[11px] tabular-nums text-muted-foreground">
-                    {details.tasks.filter((item) => item.status === "completed").length}/
-                    {details.tasks.length}
-                  </span>
-                ) : null}
-              </div>
-              <div className="mt-2.5 space-y-2">
-                {details.tasks.length > 0 ? (
-                  details.tasks.slice(0, 6).map((task) => (
-                    <div
-                      key={task.id}
-                      className="flex items-start gap-2 text-[12px] leading-4 text-muted-foreground"
-                    >
-                      <StatusDot status={task.status} />
-                      <span
-                        className={cn(
-                          "min-w-0 flex-1",
-                          task.status === "completed" && "text-muted-foreground/72",
-                        )}
-                      >
-                        {task.title}
-                      </span>
-                    </div>
-                  ))
-                ) : details.tools.length > 0 ? (
-                  details.tools.slice(0, 4).map((tool) => (
-                    <div
-                      key={tool.id}
-                      className="flex items-start gap-2 text-[12px] leading-4 text-muted-foreground"
-                    >
-                      <StatusDot status={tool.status} />
-                      <span className="min-w-0 flex-1">{tool.title}</span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-[12px] text-muted-foreground/65">
-                    {describeEmptyKanbanActivity(automation)}
-                  </p>
-                )}
-              </div>
-            </section>
-
+            {inspectorSectionOrder.map((section) => inspectorSections[section])}
             {details.subagents.length > 0 ? (
               <KanbanSubagentsSection subagents={details.subagents} />
             ) : null}
@@ -1603,7 +1607,7 @@ function KanbanInspector(props: {
                 )}
                 <div className="mt-2.5 space-y-2">
                   {fullThreadDiff.isPending && workingFiles.length === 0 ? (
-                    <p className="text-[12px] text-muted-foreground/65">
+                    <p className="text-[12px] text-muted-foreground/72">
                       Calculating the complete task diff…
                     </p>
                   ) : visibleFiles.length > 0 ? (
@@ -1617,7 +1621,7 @@ function KanbanInspector(props: {
                           {file.path}
                         </span>
                         {file.insertions === 0 && file.deletions === 0 ? (
-                          <span className="shrink-0 text-[11px] text-muted-foreground/65">
+                          <span className="shrink-0 text-[11px] text-muted-foreground/72">
                             Changed
                           </span>
                         ) : (
@@ -1629,7 +1633,7 @@ function KanbanInspector(props: {
                       </div>
                     ))
                   ) : (
-                    <p className="text-[12px] text-muted-foreground/65">
+                    <p className="text-[12px] text-muted-foreground/72">
                       No changed files were recorded for this task.
                     </p>
                   )}
@@ -1650,7 +1654,7 @@ function KanbanInspector(props: {
                     >
                       Source control
                     </h3>
-                    <p className="mt-1 text-[11px] text-muted-foreground/65">
+                    <p className="mt-1 text-[11px] text-muted-foreground/72">
                       {sourceControlSummary}
                     </p>
                   </div>
@@ -1839,7 +1843,7 @@ function HistoryBoard(props: {
               <p className="text-[12px] font-medium text-foreground/72">
                 History could not be loaded
               </p>
-              <p className="mt-1 max-w-sm text-[12px] leading-4 text-muted-foreground/60">
+              <p className="mt-1 max-w-sm text-[12px] leading-4 text-muted-foreground/70">
                 {props.error}
               </p>
               <Button variant="outline" size="sm" className="mt-3" onClick={props.onRefresh}>
@@ -1851,7 +1855,7 @@ function HistoryBoard(props: {
             <div className="flex min-h-56 flex-col items-center justify-center rounded-[22px] border border-dashed border-foreground/[0.08] text-center">
               <HistoryIcon aria-hidden className="mb-3 size-5 text-muted-foreground/35" />
               <p className="text-[12px] font-medium text-foreground/72">No project history</p>
-              <p className="mt-1 text-[12px] text-muted-foreground/60">
+              <p className="mt-1 text-[12px] text-muted-foreground/70">
                 Archived tasks will appear here without crowding the active board.
               </p>
             </div>
@@ -1893,12 +1897,13 @@ function AutomationControlBar(props: {
   const queuedCount = props.threads.filter((thread) => thread.automation?.stage === "ready").length;
 
   const toggle = async () => {
+    const enabling = !policy.enabled;
     setPending(true);
     const result = await configureAutomation({
       environmentId: props.project.environmentId,
       input: {
         projectId: props.project.id,
-        policy: { ...policy, enabled: !policy.enabled },
+        policy: { ...policy, enabled: enabling },
       },
     });
     setPending(false);
@@ -1908,7 +1913,15 @@ function AutomationControlBar(props: {
         title: "Could not update Autopilot",
         description: "Queued tasks were left unchanged.",
       });
+      return;
     }
+    toastManager.add({
+      type: "success",
+      title: enabling ? "Autopilot started" : "New runs paused",
+      description: enabling
+        ? "Queued tasks will start when dependencies and capacity allow."
+        : "Running agents continue. Queued work will wait.",
+    });
   };
 
   return (
@@ -1921,7 +1934,7 @@ function AutomationControlBar(props: {
               {policy.enabled ? "on" : "off"}
             </span>
           </span>
-          <span className="text-[11px] tabular-nums text-muted-foreground/62">
+          <span className="text-[11px] tabular-nums text-muted-foreground/72">
             {activeCount}/{policy.createWorktrees ? policy.maxConcurrentRuns : 1} active
             {queuedCount > 0 ? ` · ${queuedCount} queued` : ""}
           </span>
@@ -1942,7 +1955,7 @@ function AutomationControlBar(props: {
           disabled={pending}
         >
           {pending ? <OpenTuiSpinner name="dots" /> : policy.enabled ? <PauseIcon /> : <PlayIcon />}
-          {policy.enabled ? "Pause Autopilot" : "Start Autopilot"}
+          {policy.enabled ? "Pause new runs" : "Start Autopilot"}
         </WorkspaceToolbarActionButton>
         <Button
           variant="ghost"

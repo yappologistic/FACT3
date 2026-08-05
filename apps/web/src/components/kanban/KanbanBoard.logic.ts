@@ -3,7 +3,10 @@ import type {
   EnvironmentThread,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import type { OrchestrationAutomationDeliveryMode } from "@t3tools/contracts";
+import type {
+  OrchestrationAutomationDeliveryMode,
+  OrchestrationAutomationStage,
+} from "@t3tools/contracts";
 
 export { AUTOMATION_PLAN_EFFORTS, parseAutomationPlan } from "@t3tools/shared/automationPlan";
 export type {
@@ -16,10 +19,55 @@ export const KANBAN_ACTIVE_LANES = ["queue", "running", "attention", "review", "
 
 export type KanbanActiveLane = (typeof KANBAN_ACTIVE_LANES)[number];
 export type KanbanLane = KanbanActiveLane | "history";
+export type KanbanInspectorSection = "goal" | "plan" | "run" | "activity";
 
 export interface KanbanLaneGroup {
   readonly id: KanbanActiveLane;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
+}
+
+export function compactKanbanLaneEmptyLabel(lane: KanbanActiveLane): string {
+  switch (lane) {
+    case "queue":
+      return "No queued tasks";
+    case "running":
+      return "No agents running";
+    case "attention":
+      return "No blockers";
+    case "review":
+      return "Nothing awaiting review";
+    case "complete":
+      return "Nothing completed yet";
+  }
+}
+
+export function kanbanInspectorSectionOrder(
+  stage: OrchestrationAutomationStage | undefined,
+  taskKind: "implementation" | "planning" | undefined,
+): ReadonlyArray<KanbanInspectorSection> {
+  if (!stage) return ["goal", "activity"];
+
+  if (stage === "running") {
+    return taskKind === "planning"
+      ? ["activity", "run", "goal", "plan"]
+      : ["activity", "run", "goal"];
+  }
+
+  if (stage === "review") {
+    return taskKind === "planning"
+      ? ["plan", "run", "goal", "activity"]
+      : ["run", "activity", "goal"];
+  }
+
+  if (stage === "planned" || stage === "ready") {
+    return taskKind === "planning"
+      ? ["goal", "plan", "run", "activity"]
+      : ["goal", "run", "activity"];
+  }
+
+  return taskKind === "planning"
+    ? ["run", "activity", "goal", "plan"]
+    : ["run", "activity", "goal"];
 }
 
 export function isAutomaticWorkflowCoordinator(
