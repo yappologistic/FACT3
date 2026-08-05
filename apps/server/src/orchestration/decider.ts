@@ -46,7 +46,7 @@ const AUTOMATION_STAGE_TRANSITIONS: Readonly<Record<string, ReadonlySet<string>>
   "needs-input": new Set(["needs-input", "running", "ready", "failed", "cancelled"]),
   review: new Set(["review", "ready", "complete", "failed", "cancelled"]),
   complete: new Set(["complete", "ready"]),
-  failed: new Set(["failed", "ready", "cancelled"]),
+  failed: new Set(["failed", "ready", "complete", "cancelled"]),
   cancelled: new Set(["cancelled", "ready"]),
 };
 

@@ -13,8 +13,10 @@ import {
   groupKanbanThreads,
   incompleteAutomationDependencies,
   isAutomaticWorkflowCoordinator,
+  isCancellableAutomaticWorkflowCoordinator,
   isKanbanReviewDeliveryReady,
   isKanbanThreadVerified,
+  kanbanStateLabelsByThreadId,
   kanbanInspectorSectionOrder,
   latestCheckpointSummary,
   liveKanbanAutomation,
@@ -206,6 +208,13 @@ describe("Kanban board lifecycle", () => {
     expect(classifyKanbanThread(root, NOW)).toBe("running");
     expect(describeKanbanThreadState(root)).toBe("Coordinating");
     expect(isAutomaticWorkflowCoordinator(root.automation)).toBe(true);
+    expect(isCancellableAutomaticWorkflowCoordinator(root.automation)).toBe(true);
+    expect(
+      isCancellableAutomaticWorkflowCoordinator({ ...root.automation!, stage: "needs-input" }),
+    ).toBe(true);
+    expect(
+      isCancellableAutomaticWorkflowCoordinator({ ...root.automation!, stage: "cancelled" }),
+    ).toBe(false);
   });
 
   it("requires a clean integration worktree before human approval", () => {
@@ -363,6 +372,61 @@ describe("Kanban board lifecycle", () => {
         [active],
       ),
     ).toEqual([]);
+
+    const global = {
+      ...queued,
+      id: ThreadId.make("global-scope"),
+      automation: { ...queued.automation!, changeScopes: ["**/*"] },
+    };
+    const partialSegment = {
+      ...queued,
+      id: ThreadId.make("partial-segment-scope"),
+      automation: {
+        ...queued.automation!,
+        changeScopes: ["apps/web/src/components/Kanban*.tsx"],
+      },
+    };
+    const activeFile = {
+      ...active,
+      automation: {
+        ...active.automation!,
+        changeScopes: ["apps/web/src/components/KanbanBoard.tsx"],
+      },
+    };
+    expect(automationConflictBlockers(global, [activeFile])).toEqual([activeFile]);
+    expect(automationConflictBlockers(partialSegment, [activeFile])).toEqual([activeFile]);
+  });
+
+  it("builds dependency labels once for the complete project shell set", () => {
+    const dependency = thread({
+      id: ThreadId.make("label-dependency"),
+      title: "Dependency",
+      automation: { ...automation(), stage: "running" },
+    });
+    const dependent = thread({
+      id: ThreadId.make("label-dependent"),
+      automation: {
+        ...automation(),
+        stage: "ready",
+        dependencies: [dependency.id],
+      },
+    });
+
+    expect(kanbanStateLabelsByThreadId([dependency, dependent]).get(dependent.id)).toBe(
+      "Blocked by 1 task",
+    );
+
+    const missingDependency = {
+      ...dependent,
+      id: ThreadId.make("label-missing-dependency"),
+      automation: {
+        ...dependent.automation!,
+        dependencies: [ThreadId.make("not-in-current-shell-set")],
+      },
+    };
+    expect(kanbanStateLabelsByThreadId([missingDependency]).get(missingDependency.id)).toBe(
+      "Queued",
+    );
   });
 
   it("keeps live and waiting threads in Running", () => {

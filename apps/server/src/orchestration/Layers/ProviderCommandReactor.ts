@@ -506,8 +506,14 @@ const make = Effect.gen(function* () {
         session: {
           threadId,
           status: "starting",
-          providerName: activeSession?.provider ?? preferredProvider,
-          providerInstanceId: activeSession?.providerInstanceId ?? desiredInstanceId,
+          providerName:
+            allowAutomationProviderSwitch === true
+              ? preferredProvider
+              : (activeSession?.provider ?? preferredProvider),
+          providerInstanceId:
+            allowAutomationProviderSwitch === true
+              ? desiredInstanceId
+              : (activeSession?.providerInstanceId ?? desiredInstanceId),
           runtimeMode: desiredRuntimeMode,
           activeTurnId: null,
           lastError: null,
@@ -1319,7 +1325,11 @@ const make = Effect.gen(function* () {
       }),
     );
 
-  const worker = yield* makeKeyedDrainableWorker(processDomainEventSafely);
+  // Keep independent threads responsive without allowing a burst of projects to
+  // start an unbounded number of provider processes at once.
+  const worker = yield* makeKeyedDrainableWorker(processDomainEventSafely, {
+    maxConcurrency: 8,
+  });
 
   const start: ProviderCommandReactorShape["start"] = Effect.fn("start")(function* () {
     const processEvent = Effect.fn("processEvent")(function* (event: OrchestrationEvent) {

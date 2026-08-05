@@ -1,8 +1,11 @@
 import {
+  CheckpointRef,
   EventId,
+  MessageId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
   type ModelSelection,
   type OrchestrationAutonomousWorkflowConfig,
   type OrchestrationThread,
@@ -10,7 +13,12 @@ import {
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  AUTOMATIC_WORKFLOW_RUNTIME_MODE,
+  activeWorkflowThreadsForCancellation,
+  automationCheckpointCapturePending,
+  completedFinalAuditCanRecoverCoordinator,
   hasBlockingRequest,
+  nextFinalAuditRepairCycle,
   staleWorkflowThreads,
   workflowModelSelection,
   workflowThreadId,
@@ -95,6 +103,67 @@ function thread(input: {
 }
 
 describe("AutomationReactor workflow helpers", () => {
+  it("runs FACT3-owned workflow agents without interactive approval pauses", () => {
+    expect(AUTOMATIC_WORKFLOW_RUNTIME_MODE).toBe("full-access");
+  });
+
+  it("waits for provisional checkpoint capture unless capture failed or the turn was interrupted", () => {
+    const running = thread({ id: "checkpoint-pending" });
+    const turnId = TurnId.make("turn-checkpoint-pending");
+    const checkpoint: OrchestrationThread["checkpoints"][number] = {
+      turnId,
+      checkpointTurnCount: 1,
+      checkpointRef: CheckpointRef.make(`refs/t3/checkpoints/${running.id}/turn/1`),
+      status: "missing",
+      files: [],
+      assistantMessageId: MessageId.make(`assistant:${turnId}`),
+      completedAt: NOW,
+    };
+    const pending = {
+      ...running,
+      latestTurn: {
+        turnId,
+        state: "completed" as const,
+        requestedAt: NOW,
+        startedAt: NOW,
+        completedAt: NOW,
+        assistantMessageId: checkpoint.assistantMessageId,
+      },
+      checkpoints: [checkpoint],
+      automation: { ...running.automation!, lastHeartbeatAt: NOW },
+    };
+
+    expect(automationCheckpointCapturePending(pending, checkpoint)).toBe(true);
+    expect(
+      automationCheckpointCapturePending(
+        {
+          ...pending,
+          activities: [
+            {
+              id: EventId.make("capture-failed"),
+              tone: "error",
+              kind: "checkpoint.capture.failed",
+              summary: "Checkpoint capture failed",
+              payload: { detail: "git ref update failed" },
+              turnId,
+              createdAt: NOW,
+            },
+          ],
+        },
+        checkpoint,
+      ),
+    ).toBe(false);
+    expect(
+      automationCheckpointCapturePending(
+        {
+          ...pending,
+          latestTurn: { ...pending.latestTurn, state: "interrupted" as const },
+        },
+        checkpoint,
+      ),
+    ).toBe(false);
+  });
+
   it("routes planning, implementation, and verification turns through the configured role models", () => {
     const root = thread({
       id: "workflow",
@@ -122,6 +191,12 @@ describe("AutomationReactor workflow helpers", () => {
     expect(workflowThreadId(workflowId, "api")).not.toBe(workflowThreadId(workflowId, "ui/audit"));
   });
 
+  it("allocates a fresh repair graph after every final-audit repair cycle", () => {
+    expect(nextFinalAuditRepairCycle("__final_audit__")).toBe(1);
+    expect(nextFinalAuditRepairCycle("__final_audit__repair_1")).toBe(2);
+    expect(nextFinalAuditRepairCycle("__final_audit__repair_7")).toBe(8);
+  });
+
   it("identifies obsolete partially materialized children before releasing the workflow barrier", () => {
     const workflowId = ThreadId.make("workflow");
     const accepted = thread({
@@ -145,6 +220,96 @@ describe("AutomationReactor workflow helpers", () => {
         threads: [accepted, obsolete, unrelated],
       }).map((candidate) => candidate.id),
     ).toEqual([obsolete.id]);
+  });
+
+  it("selects every non-terminal workflow descendant when its coordinator is cancelled", () => {
+    const workflowId = ThreadId.make("workflow");
+    const ready = thread({ id: "ready", workflowId });
+    const running = {
+      ...thread({ id: "running", workflowId }),
+      automation: {
+        ...thread({ id: "running", workflowId }).automation!,
+        stage: "running" as const,
+      },
+    };
+    const complete = {
+      ...thread({ id: "complete", workflowId }),
+      automation: {
+        ...thread({ id: "complete", workflowId }).automation!,
+        stage: "complete" as const,
+      },
+    };
+    const unrelated = thread({ id: "unrelated", workflowId: ThreadId.make("other") });
+
+    expect(
+      activeWorkflowThreadsForCancellation({
+        workflowId,
+        projectId: ProjectId.make("project"),
+        threads: [ready, running, complete, unrelated],
+      }).map((candidate) => candidate.id),
+    ).toEqual([ready.id, running.id]);
+  });
+
+  it("recovers a failed coordinator only from a newer completed final audit", () => {
+    const workflowId = ThreadId.make("workflow");
+    const coordinatorBase = thread({
+      id: workflowId,
+      taskKind: "planning",
+      role: "orchestrator",
+      workflowId,
+      workflowConfig,
+    });
+    const coordinator = {
+      ...coordinatorBase,
+      automation: {
+        ...coordinatorBase.automation!,
+        stage: "failed" as const,
+        updatedAt: "2026-08-04T12:01:00.000Z",
+      },
+    };
+    const auditBase = thread({
+      id: "workflow:automation:__final_audit__",
+      role: "orchestrator",
+      workflowId,
+    });
+    const finalAudit = {
+      ...auditBase,
+      automation: {
+        ...auditBase.automation!,
+        workflowTaskKey: "__final_audit__",
+        stage: "complete" as const,
+        completedAt: "2026-08-04T12:02:00.000Z",
+      },
+    };
+
+    expect(completedFinalAuditCanRecoverCoordinator({ coordinator, finalAudit })).toBe(true);
+    expect(
+      completedFinalAuditCanRecoverCoordinator({
+        coordinator,
+        finalAudit: {
+          ...finalAudit,
+          automation: {
+            ...finalAudit.automation!,
+            completedAt: "2026-08-04T12:00:00.000Z",
+          },
+        },
+      }),
+    ).toBe(false);
+
+    const reopenedCoordinator = {
+      ...coordinator,
+      automation: {
+        ...coordinator.automation!,
+        stage: "review" as const,
+        updatedAt: "2026-08-04T12:03:00.000Z",
+      },
+    };
+    expect(
+      completedFinalAuditCanRecoverCoordinator({
+        coordinator: reopenedCoordinator,
+        finalAudit,
+      }),
+    ).toBe(false);
   });
 
   it("clears stale approval failures but preserves actionable failed responses", () => {

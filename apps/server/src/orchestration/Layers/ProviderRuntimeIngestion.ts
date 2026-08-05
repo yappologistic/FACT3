@@ -213,6 +213,11 @@ function asUnknownRecord(value: unknown): Record<string, unknown> | undefined {
 function buildCollabAgentActivitySnapshot(
   itemType: string,
   data: unknown,
+  context?: {
+    readonly provider: string;
+    readonly itemId?: string;
+    readonly status?: string;
+  },
 ):
   | {
       readonly tool?: string;
@@ -256,17 +261,21 @@ function buildCollabAgentActivitySnapshot(
       receiverThreadIds: [agentThreadId],
       ...(agentPath ? { agentPaths: { [agentThreadId]: agentPath } } : {}),
       agentsStates: {
-        [agentThreadId]: { status: kind === "interrupted" ? "interrupted" : "running" },
+        [agentThreadId]: {
+          status:
+            kind === "completed" || kind === "failed" || kind === "interrupted" ? kind : "running",
+        },
       },
     };
   }
 
-  const tool = typeof item.tool === "string" ? item.tool : undefined;
-  const prompt = typeof item.prompt === "string" ? truncateDetail(item.prompt, 4_000) : undefined;
-  const model = typeof item.model === "string" ? item.model.trim() || undefined : undefined;
-  const reasoningEffort =
-    typeof item.reasoningEffort === "string" ? item.reasoningEffort.trim() || undefined : undefined;
-  const receiverThreadIds = Array.isArray(item.receiverThreadIds)
+  const rawTool =
+    typeof item.tool === "string"
+      ? item.tool
+      : typeof item.toolName === "string"
+        ? item.toolName
+        : undefined;
+  const explicitReceiverThreadIds = Array.isArray(item.receiverThreadIds)
     ? [
         ...new Set(
           item.receiverThreadIds.flatMap((value) =>
@@ -275,6 +284,20 @@ function buildCollabAgentActivitySnapshot(
         ),
       ]
     : undefined;
+  const syntheticReceiverId =
+    (explicitReceiverThreadIds?.length ?? 0) === 0 && context?.itemId && rawTool
+      ? `${context.provider}:tool:${context.itemId}`
+      : undefined;
+  const tool = syntheticReceiverId ? "spawnAgent" : rawTool;
+  const prompt = typeof item.prompt === "string" ? truncateDetail(item.prompt, 4_000) : undefined;
+  const model = typeof item.model === "string" ? item.model.trim() || undefined : undefined;
+  const reasoningEffort =
+    typeof item.reasoningEffort === "string" ? item.reasoningEffort.trim() || undefined : undefined;
+  const receiverThreadIds = explicitReceiverThreadIds?.length
+    ? explicitReceiverThreadIds
+    : syntheticReceiverId
+      ? [syntheticReceiverId]
+      : undefined;
   const receiverThreadIdSet = new Set(receiverThreadIds ?? []);
   const rawAgentStates = asUnknownRecord(item.agentsStates);
   const agentsStates: Record<string, { readonly status: string; readonly message?: string }> = {};
@@ -296,6 +319,15 @@ function buildCollabAgentActivitySnapshot(
         };
       }
     }
+  }
+  if (syntheticReceiverId) {
+    const terminalStatus =
+      context?.status === "completed" ||
+      context?.status === "failed" ||
+      context?.status === "interrupted"
+        ? context.status
+        : "running";
+    agentsStates[syntheticReceiverId] = { status: terminalStatus };
   }
 
   if (
@@ -754,7 +786,11 @@ export function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
-      const collab = buildCollabAgentActivitySnapshot(event.payload.itemType, event.payload.data);
+      const collab = buildCollabAgentActivitySnapshot(event.payload.itemType, event.payload.data, {
+        provider: event.provider,
+        ...(event.itemId ? { itemId: event.itemId } : {}),
+        ...(event.payload.status ? { status: event.payload.status } : {}),
+      });
       return [
         {
           id: event.eventId,
@@ -804,7 +840,11 @@ export function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
-      const collab = buildCollabAgentActivitySnapshot(event.payload.itemType, event.payload.data);
+      const collab = buildCollabAgentActivitySnapshot(event.payload.itemType, event.payload.data, {
+        provider: event.provider,
+        ...(event.itemId ? { itemId: event.itemId } : {}),
+        ...(event.payload.status ? { status: event.payload.status } : {}),
+      });
       return [
         {
           id: event.eventId,
@@ -829,7 +869,11 @@ export function runtimeEventToActivities(
       if (!isToolLifecycleItemType(event.payload.itemType)) {
         return [];
       }
-      const collab = buildCollabAgentActivitySnapshot(event.payload.itemType, event.payload.data);
+      const collab = buildCollabAgentActivitySnapshot(event.payload.itemType, event.payload.data, {
+        provider: event.provider,
+        ...(event.itemId ? { itemId: event.itemId } : {}),
+        ...(event.payload.status ? { status: event.payload.status } : {}),
+      });
       return [
         {
           id: event.eventId,

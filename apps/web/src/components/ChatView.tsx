@@ -1619,8 +1619,8 @@ function ChatViewContent(props: ChatViewProps) {
     : null;
   const activeProject = useProject(activeProjectRef);
   const kanbanProjectRefs = useMemo(
-    () => (activeProjectRef ? [activeProjectRef] : []),
-    [activeProjectRef],
+    () => (workspaceView === "board" && activeProjectRef ? [activeProjectRef] : []),
+    [activeProjectRef, workspaceView],
   );
   const kanbanThreads = useThreadShellsForProjectRefs(kanbanProjectRefs);
   const archivedEnvironmentIds = useMemo(
@@ -5886,7 +5886,7 @@ function ChatViewContent(props: ChatViewProps) {
               onHistoryOpenChange={setKanbanHistoryOpen}
               newTaskOpen={kanbanNewTaskOpen}
               onNewTaskOpenChange={setKanbanNewTaskOpen}
-              baseBranch={activeThread.branch ?? "main"}
+              baseBranch={activeThread.automation?.baseBranch ?? activeThread.branch ?? "main"}
               modelSelection={activeProject.defaultModelSelection ?? activeThread.modelSelection}
               providers={providerStatuses}
               settings={settings}

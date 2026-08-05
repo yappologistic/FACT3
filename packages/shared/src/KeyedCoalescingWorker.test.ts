@@ -6,6 +6,23 @@ import * as Effect from "effect/Effect";
 import { makeKeyedCoalescingWorker } from "./KeyedCoalescingWorker.ts";
 
 describe("makeKeyedCoalescingWorker", () => {
+  it.live("processes undefined values instead of treating them as missing work", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const processed: string[] = [];
+        const worker = yield* makeKeyedCoalescingWorker<string, undefined, never, never>({
+          merge: () => undefined,
+          process: (key) => Effect.sync(() => processed.push(key)),
+        });
+
+        yield* worker.enqueue("project-1", undefined);
+        yield* worker.drain;
+
+        expect(processed).toEqual(["project-1"]);
+      }),
+    ),
+  );
+
   it.live("waits for latest work enqueued during active processing before draining the key", () =>
     Effect.scoped(
       Effect.gen(function* () {

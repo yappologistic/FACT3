@@ -7,7 +7,10 @@
  *
  * @module KeyedDrainableWorker
  */
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
+import * as Semaphore from "effect/Semaphore";
 import * as Scope from "effect/Scope";
 import * as TxQueue from "effect/TxQueue";
 import * as TxRef from "effect/TxRef";
@@ -26,6 +29,7 @@ interface KeyedDrainableWorkerState<K, A> {
 
 export const makeKeyedDrainableWorker = <K, A, E, R>(
   process: (item: A) => Effect.Effect<void, E, R>,
+  options?: { readonly maxConcurrency?: number },
 ): Effect.Effect<KeyedDrainableWorker<K, A>, never, Scope.Scope | R> =>
   Effect.gen(function* () {
     const readyKeys = yield* Effect.acquireRelease(TxQueue.unbounded<K>(), TxQueue.shutdown);
@@ -35,15 +39,20 @@ export const makeKeyedDrainableWorker = <K, A, E, R>(
       activeKeys: new Set(),
       outstanding: 0,
     });
+    const semaphore =
+      options?.maxConcurrency === undefined
+        ? undefined
+        : yield* Semaphore.make(Math.max(1, Math.floor(options.maxConcurrency)));
+    const processItem = (item: A) =>
+      semaphore === undefined ? process(item) : semaphore.withPermits(1)(process(item));
 
     const processKey = (key: K): Effect.Effect<void, E, R> =>
       TxRef.modify(stateRef, (state) => {
         const items = state.itemsByKey.get(key) ?? [];
-        const item = items[0];
-        if (item === undefined) {
+        if (items.length === 0) {
           const activeKeys = new Set(state.activeKeys);
           activeKeys.delete(key);
-          return [null, { ...state, activeKeys }] as const;
+          return [Option.none<A>(), { ...state, activeKeys }] as const;
         }
 
         const itemsByKey = new Map(state.itemsByKey);
@@ -52,13 +61,21 @@ export const makeKeyedDrainableWorker = <K, A, E, R>(
         } else {
           itemsByKey.set(key, items.slice(1));
         }
-        return [item, { ...state, itemsByKey }] as const;
+        return [Option.some(items[0] as A), { ...state, itemsByKey }] as const;
       }).pipe(
         Effect.tx,
-        Effect.flatMap((item) =>
-          item === null
-            ? Effect.void
-            : process(item).pipe(
+        Effect.flatMap(
+          Option.match({
+            onNone: () => Effect.void,
+            onSome: (item) =>
+              processItem(item).pipe(
+                Effect.catchCause((cause) =>
+                  Cause.hasInterruptsOnly(cause)
+                    ? Effect.failCause(cause)
+                    : Effect.logWarning("keyed drainable worker item failed", {
+                        cause: Cause.pretty(cause),
+                      }),
+                ),
                 Effect.ensuring(
                   TxRef.update(stateRef, (state) => ({
                     ...state,
@@ -67,6 +84,7 @@ export const makeKeyedDrainableWorker = <K, A, E, R>(
                 ),
                 Effect.flatMap(() => processKey(key)),
               ),
+          }),
         ),
       );
 

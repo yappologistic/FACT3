@@ -263,6 +263,8 @@ function deriveSubagents(
 
       if (itemType === "subAgentActivity" && id === agentThreadId) {
         const kind = asString(item?.kind);
+        const terminalMessage = asString(item?.message);
+        if (terminalMessage) target.result = terminalMessage;
         if (kind === "interrupted") target.status = "stopped";
         else if (kind === "completed") target.status = "completed";
         else if (kind === "failed") target.status = "failed";
@@ -272,24 +274,23 @@ function deriveSubagents(
         target.status === "running" &&
         tool !== "spawnAgent" &&
         tool !== "resumeAgent" &&
-        tool !== "sendInput"
+        tool !== "sendInput" &&
+        tool !== "wait"
       ) {
         target.status = "completed";
       }
     }
   }
 
-  // Codex currently reports a child agent's final message as an assistant
-  // message scoped to the child provider thread, then closes the
-  // subAgentActivity item as "interrupted". The final message is the stronger
-  // completion signal and is also the result users expect to inspect here.
+  // A child message is useful result text, but commentary may arrive before
+  // the child actually exits. Lifecycle snapshots remain authoritative for
+  // completion so a late-running child is never presented as finished.
   for (const activity of activities) {
     const message = linkedSubagentMessage(activity);
     if (!message) continue;
     const target = byId.get(message.agentThreadId);
     if (!target) continue;
     target.result = message.result;
-    target.status = "completed";
   }
 
   return [...byId.values()].map((agent, index) => ({
@@ -332,7 +333,11 @@ export function deriveSubagentAssistantMessageIds(
   for (const activity of scoped) {
     const message = linkedSubagentMessage(activity);
     if (message && agentThreadIds.has(message.agentThreadId)) {
-      messageIds.add(message.messageId);
+      messageIds.add(
+        message.messageId.startsWith("assistant:")
+          ? message.messageId
+          : `assistant:${message.messageId}`,
+      );
     }
   }
   return messageIds;

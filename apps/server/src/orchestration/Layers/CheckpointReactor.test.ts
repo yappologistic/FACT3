@@ -11,6 +11,7 @@ import {
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import {
+  CheckpointRef,
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
   EventId,
@@ -23,8 +24,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as ManagedRuntime from "effect/ManagedRuntime";
+import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -39,7 +42,7 @@ import { CheckpointReactorLive } from "./CheckpointReactor.ts";
 import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import { OrchestrationProjectionPipelineLive } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
-import { RuntimeReceiptBusLive } from "./RuntimeReceiptBus.ts";
+import { RuntimeReceiptBusTest } from "./RuntimeReceiptBus.ts";
 import { OrchestrationEventStoreLive } from "../../persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
@@ -49,6 +52,7 @@ import {
 } from "../Services/OrchestrationEngine.ts";
 import { CheckpointReactor } from "../Services/CheckpointReactor.ts";
 import { ProjectionSnapshotQuery } from "../Services/ProjectionSnapshotQuery.ts";
+import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
 import {
   ProviderService,
   type ProviderServiceShape,
@@ -249,7 +253,8 @@ describe("CheckpointReactor", () => {
     | OrchestrationEngineService
     | CheckpointReactor
     | CheckpointStore.CheckpointStore
-    | ProjectionSnapshotQuery,
+    | ProjectionSnapshotQuery
+    | RuntimeReceiptBus,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -327,7 +332,7 @@ describe("CheckpointReactor", () => {
     const layer = CheckpointReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
-      Layer.provideMerge(RuntimeReceiptBusLive),
+      Layer.provideMerge(RuntimeReceiptBusTest),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer))),
@@ -350,6 +355,7 @@ describe("CheckpointReactor", () => {
     const checkpointStore = await runtime.runPromise(
       Effect.service(CheckpointStore.CheckpointStore),
     );
+    const receiptBus = await runtime.runPromise(Effect.service(RuntimeReceiptBus));
     scope = await Effect.runPromise(Scope.make("sequential"));
     await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
     const drain = () => Effect.runPromise(reactor.drain);
@@ -415,6 +421,7 @@ describe("CheckpointReactor", () => {
       engine,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       provider,
+      receiptBus,
       cwd,
       drain,
     };
@@ -649,6 +656,188 @@ describe("CheckpointReactor", () => {
     expect(
       gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 1)),
     ).toBe(true);
+  });
+
+  it("refreshes a provisional mid-turn checkpoint with the final filesystem state", async () => {
+    const harness = await createHarness({ seedFilesystemCheckpoints: false });
+    const threadId = ThreadId.make("thread-1");
+    const turnId = asTurnId("turn-provisional-refresh");
+    const baselineRef = checkpointRefForThreadTurn(threadId, 0);
+    const checkpointRef = checkpointRefForThreadTurn(threadId, 1);
+    const createdAt = "2026-01-01T00:00:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-provisional-refresh"),
+        threadId,
+        session: {
+          threadId,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: turnId,
+          lastError: null,
+          updatedAt: createdAt,
+        },
+        createdAt,
+      }),
+    );
+
+    await runtime!.runPromise(
+      Effect.gen(function* () {
+        const receiptFiber = yield* harness.receiptBus.streamEventsForTest.pipe(
+          Stream.filter(
+            (receipt) =>
+              receipt.type === "checkpoint.baseline.captured" &&
+              receipt.threadId === threadId &&
+              receipt.checkpointRef === baselineRef,
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* Effect.sync(() =>
+          harness.provider.emit({
+            type: "turn.started",
+            eventId: EventId.make("evt-turn-started-provisional-refresh"),
+            provider: ProviderDriverKind.make("codex"),
+            createdAt,
+            threadId,
+            turnId,
+          }),
+        );
+        Option.getOrThrow(yield* Fiber.join(receiptFiber));
+      }),
+    );
+
+    NodeFS.writeFileSync(NodePath.join(harness.cwd, "README.md"), "intermediate\n", "utf8");
+
+    const provisionalReceipt = await runtime!.runPromise(
+      Effect.gen(function* () {
+        const receiptFiber = yield* harness.receiptBus.streamEventsForTest.pipe(
+          Stream.filter(
+            (receipt) =>
+              receipt.type === "checkpoint.diff.finalized" &&
+              receipt.threadId === threadId &&
+              receipt.turnId === turnId &&
+              receipt.status === "missing",
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* harness.engine.dispatch({
+          type: "thread.turn.diff.complete",
+          commandId: CommandId.make("cmd-provisional-turn-diff"),
+          threadId,
+          turnId,
+          completedAt: "2026-01-01T00:00:01.000Z",
+          checkpointRef: CheckpointRef.make("provider-diff:provisional-refresh"),
+          status: "missing",
+          files: [],
+          assistantMessageId: MessageId.make("assistant:provisional-refresh"),
+          checkpointTurnCount: 1,
+          createdAt: "2026-01-01T00:00:01.000Z",
+        });
+        return Option.getOrThrow(yield* Fiber.join(receiptFiber));
+      }),
+    );
+
+    if (provisionalReceipt.type !== "checkpoint.diff.finalized") {
+      throw new Error(`Unexpected receipt type: ${provisionalReceipt.type}`);
+    }
+    expect(provisionalReceipt.checkpointRef).toBe(checkpointRef);
+    expect(gitShowFileAtRef(harness.cwd, checkpointRef, "README.md")).toBe("intermediate\n");
+    const provisionalThread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === threadId,
+    );
+    expect(provisionalThread?.checkpoints[0]?.status).toBe("missing");
+
+    await Effect.runPromise(Effect.yieldNow);
+    await harness.drain();
+    await Effect.runPromise(Effect.yieldNow);
+    await harness.drain();
+    const eventsAfterProvisionalCapture = Array.from(
+      await Effect.runPromise(Stream.runCollect(harness.engine.readEvents(0))),
+    );
+    expect(
+      eventsAfterProvisionalCapture.filter(
+        (event) =>
+          event.type === "thread.turn-diff-completed" &&
+          event.payload.turnId === turnId &&
+          event.payload.checkpointRef === checkpointRef,
+      ),
+    ).toHaveLength(1);
+    const stableProvisionalThread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === threadId,
+    );
+    expect(
+      stableProvisionalThread?.activities.filter(
+        (activity) => activity.kind === "checkpoint.captured",
+      ),
+    ).toHaveLength(1);
+
+    NodeFS.writeFileSync(NodePath.join(harness.cwd, "README.md"), "final\n", "utf8");
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-completed-provisional-refresh"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:02.000Z",
+        },
+        createdAt: "2026-01-01T00:00:02.000Z",
+      }),
+    );
+
+    const finalReceipt = await runtime!.runPromise(
+      Effect.gen(function* () {
+        const receiptFiber = yield* harness.receiptBus.streamEventsForTest.pipe(
+          Stream.filter(
+            (receipt) =>
+              receipt.type === "checkpoint.diff.finalized" &&
+              receipt.threadId === threadId &&
+              receipt.turnId === turnId &&
+              receipt.status === "ready",
+          ),
+          Stream.runHead,
+          Effect.forkChild,
+        );
+        yield* Effect.sync(() =>
+          harness.provider.emit({
+            type: "turn.completed",
+            eventId: EventId.make("evt-turn-completed-provisional-refresh"),
+            provider: ProviderDriverKind.make("codex"),
+            createdAt: "2026-01-01T00:00:02.000Z",
+            threadId,
+            turnId,
+            payload: { state: "completed" },
+          }),
+        );
+        return Option.getOrThrow(yield* Fiber.join(receiptFiber));
+      }),
+    );
+
+    if (finalReceipt.type !== "checkpoint.diff.finalized") {
+      throw new Error(`Unexpected receipt type: ${finalReceipt.type}`);
+    }
+    expect(finalReceipt.checkpointRef).toBe(checkpointRef);
+    expect(gitShowFileAtRef(harness.cwd, checkpointRef, "README.md")).toBe("final\n");
+    const finalThread = (await harness.readModel()).threads.find((entry) => entry.id === threadId);
+    expect(finalThread?.checkpoints).toHaveLength(1);
+    expect(finalThread?.checkpoints[0]).toMatchObject({
+      turnId,
+      checkpointTurnCount: 1,
+      checkpointRef,
+      status: "ready",
+      files: [{ path: "README.md", additions: 1, deletions: 1 }],
+    });
   });
 
   it("appends capture failure activity when turn diff summary cannot be derived", async () => {
@@ -963,7 +1152,9 @@ describe("CheckpointReactor", () => {
       threadId: ThreadId.make("thread-1"),
       numTurns: 1,
     });
-    expect(NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8")).toBe("v2\n");
+    expect(
+      NodeFS.readFileSync(NodePath.join(harness.cwd, "README.md"), "utf8").replaceAll("\r\n", "\n"),
+    ).toBe("v2\n");
     expect(
       gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make("thread-1"), 2)),
     ).toBe(false);

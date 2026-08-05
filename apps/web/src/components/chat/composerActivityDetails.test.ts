@@ -158,7 +158,7 @@ describe("deriveComposerActivityDetails", () => {
     expect(details.subagents[0]).not.toHaveProperty("reasoningEffort");
   });
 
-  it("folds Codex child final messages into completed sub-agent results", () => {
+  it("folds Codex child messages into results without overriding lifecycle status", () => {
     const activities = [
       makeActivity({
         id: "agent-start",
@@ -219,11 +219,11 @@ describe("deriveComposerActivityDetails", () => {
         id: "agent-1",
         name: "Interaction review",
         result: "Interaction verified.",
-        status: "completed",
+        status: "stopped",
       }),
     ]);
     expect(deriveSubagentAssistantMessageIds(activities, TurnId.make("turn-1"))).toEqual(
-      new Set(["message-1"]),
+      new Set(["assistant:message-1"]),
     );
   });
 

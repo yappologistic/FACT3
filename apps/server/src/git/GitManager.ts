@@ -902,9 +902,11 @@ export const make = Effect.gen(function* () {
       };
       return resolveBranchHeadContext(cwd, details).pipe(
         Effect.flatMap((headContext) =>
-          findLatestPrForHeadContext(cwd, headContext).pipe(
-            Effect.map((latest) => ({ latest, headContext })),
-          ),
+          headContext.headRemoteUrlKey === null
+            ? Effect.succeed({ latest: null, headContext, lookupSkipped: true })
+            : findLatestPrForHeadContext(cwd, headContext).pipe(
+                Effect.map((latest) => ({ latest, headContext, lookupSkipped: false })),
+              ),
         ),
       );
     },
@@ -979,27 +981,38 @@ export const make = Effect.gen(function* () {
     // `push -u`) must not orphan the fallback value for the same branch.
     const branchKey = `${cwd}\u0000${details.branch}`;
     return yield* Cache.get(prLookupCache, prLookupCacheKey(cwd, details)).pipe(
-      Effect.map(({ latest, headContext }) => {
-        if (!latest) return { pr: null, headContext };
+      Effect.map(({ latest, headContext, lookupSkipped }) => {
+        if (!latest) return { pr: null, headContext, lookupSkipped };
         // On the default branch, only surface open PRs.
         // Merged/closed matches are usually reverse-merge history, not the thread's PR context.
         if (details.isDefaultBranch && latest.state !== "open") {
-          return { pr: null, headContext };
+          return { pr: null, headContext, lookupSkipped };
         }
-        return { pr: toStatusPr(latest), headContext };
+        return { pr: toStatusPr(latest), headContext, lookupSkipped };
       }),
-      Effect.tap(({ pr, headContext }) =>
-        Effect.sync(() =>
-          rememberLastKnownPr(branchKey, {
-            pr,
-            upstreamRef: details.upstreamRef,
-            headBranch: headContext.headBranch,
-            remoteName: headContext.remoteName,
-            headRemoteUrlKey: headContext.headRemoteUrlKey,
-          }),
-        ),
+      Effect.tap(({ pr, headContext, lookupSkipped }) =>
+        lookupSkipped
+          ? Effect.void
+          : Effect.sync(() =>
+              rememberLastKnownPr(branchKey, {
+                pr,
+                upstreamRef: details.upstreamRef,
+                headBranch: headContext.headBranch,
+                remoteName: headContext.remoteName,
+                headRemoteUrlKey: headContext.headRemoteUrlKey,
+              }),
+            ),
       ),
-      Effect.map(({ pr }) => pr),
+      Effect.map(({ pr, headContext, lookupSkipped }) =>
+        lookupSkipped
+          ? resolveLastKnownPr(branchKey, {
+              upstreamRef: details.upstreamRef,
+              headBranch: headContext.headBranch,
+              remoteName: headContext.remoteName,
+              headRemoteUrlKey: headContext.headRemoteUrlKey,
+            })
+          : pr,
+      ),
       Effect.catch((error) =>
         Effect.logWarning("PR lookup failed; keeping last known PR state.").pipe(
           Effect.annotateLogs({

@@ -391,6 +391,21 @@ it.layer(NodeServices.layer)("automation decider", (it) => {
         reviewModel,
       );
       expect(singleEvent(failedCoordination).type).toBe("thread.automation-transitioned");
+      const failedModel = yield* projectEvent(reviewModel, sequenced(failedCoordination, 7));
+      const recoveredCompletion = yield* decide(
+        {
+          type: "thread.automation.transition",
+          commandId: CommandId.make("coordination-recovered-completion"),
+          threadId: threadA,
+          expectedStage: "failed",
+          stage: "complete",
+          lastError: null,
+          completedAt: NOW,
+          updatedAt: NOW,
+        },
+        failedModel,
+      );
+      expect(singleEvent(recoveredCompletion).type).toBe("thread.automation-transitioned");
     }),
   );
 });

@@ -29,6 +29,7 @@ import {
   automationRetryDecision,
   automationStuckDeadline,
   buildAutomationPrompt,
+  buildAutomationWorkflowEvidence,
   classifyAutomationFailure,
   resolveAutomationDependencyBranches,
   selectRunnableAutomationTasks,
@@ -250,6 +251,25 @@ describe("automation scheduler decisions", () => {
         ],
       }),
     ).toBe(1);
+  });
+
+  it("holds a concurrency slot until a cancelled provider session is quiescent", () => {
+    const cancelled = task({ id: "cancelled-but-stopping", stage: "cancelled" });
+    const stopping: OrchestrationThread = {
+      ...cancelled,
+      session: {
+        threadId: cancelled.id,
+        status: "running",
+        providerName: "codex",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: NOW,
+      },
+    };
+
+    expect(automationAvailableSlots({ policy, tasks: [stopping] })).toBe(2);
   });
 
   it("starts only dependency-ready tasks and respects available slots", () => {
@@ -475,11 +495,16 @@ describe("automation scheduler decisions", () => {
       thread: finalAudit,
       project: projectFor(finalAudit),
       policy,
+      workflowEvidence: "Task: worker\nLifecycle: stage=complete, verification=passed",
     });
 
     expect(planningPrompt).toContain("planning a real autonomous FACT3 Kanban project");
     expect(planningPrompt).toContain('"tasks"');
     expect(planningPrompt).toContain('"role":"worker|visual"');
+    expect(planningPrompt).toContain("Plan only implementation tasks");
+    expect(planningPrompt).toContain("FACT3 automatically adds independent verification");
+    expect(planningPrompt).toContain("between 1 and 8 tasks");
+    expect(planningPrompt).not.toContain("between 2 and 8 tasks");
     expect(planAuditPrompt).toContain("auditing the prior autonomous FACT3 project plan");
     expect(planAuditPrompt).toContain("Return a corrected final plan");
     expect(planAuditPrompt).toContain('"tasks"');
@@ -488,6 +513,37 @@ describe("automation scheduler decisions", () => {
     expect(finalPrompt).toContain("performing the final audit");
     expect(finalPrompt).toContain('"status":"complete|repair-required|needs-input"');
     expect(finalPrompt).toContain('"followUpTasks"');
+    expect(finalPrompt).toContain("Persisted FACT3 workflow evidence");
+    expect(finalPrompt).toContain("verification=passed");
+  });
+
+  it("passes bounded persisted task evidence to the final workflow audit", () => {
+    const worker = task({ id: "evidence-worker", stage: "complete", role: "worker" });
+    const verifiedWorker = {
+      ...worker,
+      automation: {
+        ...worker.automation!,
+        verification: {
+          status: "passed" as const,
+          summary: "Nested review and focused checks passed.",
+          evidence: [
+            {
+              check: "Nested child and grandchild reached terminal completion.",
+              detail: "Child relayed the grandchild APPROVE disposition before completion.",
+            },
+          ],
+          completedAt: NOW,
+        },
+      },
+    };
+
+    expect(
+      buildAutomationWorkflowEvidence({
+        workflowId: "workflow",
+        excludeThreadId: "final-audit",
+        threads: [verifiedWorker],
+      }),
+    ).toContain("Child relayed the grandchild APPROVE disposition");
   });
 
   it("requires verifier evidence and keeps verification independent from repairs", () => {

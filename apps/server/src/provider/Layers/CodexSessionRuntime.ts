@@ -679,23 +679,17 @@ function rememberCollabReceiverTurns(
   }
 }
 
-function shouldSuppressChildConversationNotification(
-  method: CodexRpc.ServerNotificationMethod,
+export function shouldSuppressChildConversationNotification(
+  notification: CodexServerNotification,
 ): boolean {
-  return (
-    method === "thread/started" ||
-    method === "thread/status/changed" ||
-    method === "thread/archived" ||
-    method === "thread/unarchived" ||
-    method === "thread/closed" ||
-    method === "thread/compacted" ||
-    method === "thread/name/updated" ||
-    method === "thread/tokenUsage/updated" ||
-    method === "turn/started" ||
-    method === "turn/completed" ||
-    method === "turn/plan/updated" ||
-    method === "item/plan/delta"
-  );
+  if (notification.method === "item/started" || notification.method === "item/completed") {
+    const item = notification.params.item;
+    return item.type !== "collabAgentToolCall" && item.type !== "subAgentActivity";
+  }
+  // A child conversation has its own messages, errors, diffs, usage, and tool
+  // lifecycle. Only collaboration lifecycle is projected onto the parent turn;
+  // otherwise child output can become the parent's authoritative result.
+  return true;
 }
 
 function toCodexUserInputAnswer(
@@ -1016,7 +1010,7 @@ export const makeCodexSessionRuntime = (
           });
           return;
         }
-        if (childParentTurnId && shouldSuppressChildConversationNotification(notification.method)) {
+        if (childParentTurnId && shouldSuppressChildConversationNotification(notification)) {
           yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
           return;
         }

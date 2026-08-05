@@ -45,6 +45,54 @@ export interface AutomationDependencyTerminalBlocker {
   readonly detail: string;
 }
 
+const MAX_AUDIT_EVIDENCE_PER_TASK = 8;
+const MAX_AUDIT_EVIDENCE_DETAIL_LENGTH = 1_000;
+
+function boundedAuditEvidence(value: string): string {
+  return value.length <= MAX_AUDIT_EVIDENCE_DETAIL_LENGTH
+    ? value
+    : `${value.slice(0, MAX_AUDIT_EVIDENCE_DETAIL_LENGTH - 1)}…`;
+}
+
+/** Formats persisted task verification records for the final workflow audit. */
+export function buildAutomationWorkflowEvidence(input: {
+  readonly workflowId: string;
+  readonly excludeThreadId: string;
+  readonly threads: ReadonlyArray<OrchestrationThread>;
+}): string | null {
+  const workflowThreads = input.threads
+    .filter(
+      (thread) =>
+        thread.id !== input.excludeThreadId && thread.automation?.workflowId === input.workflowId,
+    )
+    .toSorted(
+      (left, right) =>
+        left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+    );
+  if (workflowThreads.length === 0) return null;
+
+  return workflowThreads
+    .map((thread) => {
+      const automation = thread.automation!;
+      const verification = automation.verification;
+      const evidence = verification.evidence.slice(0, MAX_AUDIT_EVIDENCE_PER_TASK);
+      const omitted = verification.evidence.length - evidence.length;
+      return [
+        `Task: ${thread.title} (${automation.workflowTaskKey ?? thread.id}, role=${automation.role})`,
+        `Lifecycle: stage=${automation.stage}, verification=${verification.status}`,
+        ...(verification.summary
+          ? [`Verification summary: ${boundedAuditEvidence(verification.summary)}`]
+          : []),
+        ...evidence.map(
+          (entry) =>
+            `- ${boundedAuditEvidence(entry.check)}: ${boundedAuditEvidence(entry.detail)}`,
+        ),
+        ...(omitted > 0 ? [`- ${omitted} additional persisted checks omitted for brevity.`] : []),
+      ].join("\n");
+    })
+    .join("\n\n");
+}
+
 function workflowContext(thread: OrchestrationThread): ReadonlyArray<string> {
   const automation = thread.automation!;
   return [
@@ -84,6 +132,7 @@ export function buildAutomationPrompt(input: {
   readonly project: OrchestrationProject;
   readonly policy: OrchestrationProjectAutomationPolicy;
   readonly dependencyBranches?: ReadonlyArray<string>;
+  readonly workflowEvidence?: string | null;
 }): string {
   const automation = input.thread.automation!;
   const criteria =
@@ -122,7 +171,8 @@ export function buildAutomationPrompt(input: {
       "The JSON must have this exact shape:",
       planJsonShape,
       "Assign role=visual only when visual design, interaction, responsive behavior, accessibility, or screenshot-based review is a material part of the task; otherwise use role=worker. Role models are configured by the user, so do not invent model identifiers.",
-      "Every task needs at least one acceptance criterion, one narrow change scope, and one verification check. Dependencies must reference task keys and must not contain cycles. Avoid multiple tasks that own the same files; if overlap is unavoidable, express it as a dependency. Keep the plan between 2 and 8 tasks.",
+      "Plan only implementation tasks. FACT3 automatically adds independent verification, integration, and final-audit stages; do not add coordination-only verification, integration, or audit tasks to the plan.",
+      "Every task needs at least one acceptance criterion, one narrow change scope, and one verification check. Dependencies must reference task keys and must not contain cycles. Avoid multiple tasks that own the same files; if overlap is unavoidable, express it as a dependency. Keep the plan between 1 and 8 tasks.",
     ]
       .filter((part): part is string => Boolean(part))
       .join("\n\n");
@@ -136,8 +186,12 @@ export function buildAutomationPrompt(input: {
       ...context,
       "Acceptance criteria:",
       criteria,
+      input.workflowEvidence
+        ? `Persisted FACT3 workflow evidence (validate repository claims directly where possible; use lifecycle records for orchestration-only criteria):\n${input.workflowEvidence}`
+        : "No persisted workflow evidence was supplied. Do not assume orchestration-only criteria passed.",
       feedback,
       recovery,
+      "This is a read-only audit. Do not modify, format, commit, or otherwise change repository files; report repair work in followUpTasks so FACT3 can route it through implementation and verification.",
       'Return only one fenced JSON block with this exact shape: {"status":"complete|repair-required|needs-input","summary":"one sentence","failedCriteria":["criterion"],"remainingRisks":["specific risk"],"followUpTasks":[{"title":"action title","goal":"bounded goal","role":"worker|visual"}]}.',
       "Do not declare completion from task status alone. Check the combined result and cite concrete repository evidence in the JSON.",
     ]
@@ -218,7 +272,10 @@ export function automationAvailableSlots(input: {
 }): number {
   const active = input.tasks.filter(
     (thread) =>
-      thread.automation?.stage === "running" || thread.automation?.stage === "needs-input",
+      thread.automation?.stage === "running" ||
+      thread.automation?.stage === "needs-input" ||
+      thread.session?.status === "starting" ||
+      thread.session?.status === "running",
   ).length;
   return Math.max(0, automationConcurrencyLimit(input.policy) - active);
 }

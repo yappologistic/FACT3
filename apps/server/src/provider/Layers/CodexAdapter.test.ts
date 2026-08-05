@@ -574,6 +574,51 @@ function startLifecycleRuntime() {
 }
 
 lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
+  it.effect("keeps forwarding events after the session-start caller completes", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const startFiber = yield* adapter
+        .startSession({
+          provider: ProviderDriverKind.make("codex"),
+          threadId: asThreadId("thread-1"),
+          runtimeMode: "full-access",
+        })
+        .pipe(Effect.forkChild);
+      yield* Fiber.join(startFiber);
+
+      const runtime = lifecycleRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-after-start-caller"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("msg-after-start-caller"),
+        payload: {
+          completedAtMs: 1_778_000_000_000,
+          threadId: "thread-1",
+          turnId: "turn-1",
+          item: {
+            type: "agentMessage",
+            id: "msg-after-start-caller",
+            text: "still forwarded",
+          },
+        },
+      });
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag === "Some") {
+        NodeAssert.equal(firstEvent.value.type, "item.completed");
+      }
+    }),
+  );
+
   it.effect("maps completed agent message items to canonical item.completed events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();
@@ -696,6 +741,82 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         return;
       }
       NodeAssert.equal(firstEvent.value.payload.itemType, "collab_agent_tool_call");
+    }),
+  );
+
+  it.effect("maps synthesized completed sub-agent markers without the upstream schema", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-subagent-synthetic-completed"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("spawn_1"),
+        payload: {
+          completedAtMs: 1_778_000_000_000,
+          threadId: "agent-1",
+          turnId: "turn-1",
+          item: {
+            type: "subAgentActivity",
+            id: "spawn_1",
+            kind: "completed",
+            agentPath: "/root/review_web",
+            agentThreadId: "agent-1",
+          },
+        },
+      });
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some" || firstEvent.value.type !== "item.completed") return;
+      NodeAssert.equal(firstEvent.value.payload.itemType, "collab_agent_tool_call");
+      NodeAssert.equal(firstEvent.value.payload.status, "completed");
+      NodeAssert.equal(
+        (firstEvent.value.payload.data as { item?: { kind?: string } }).item?.kind,
+        "completed",
+      );
+    }),
+  );
+
+  it.effect("preserves synthesized failed sub-agent markers as failures", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-subagent-synthetic-failed"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "item/completed",
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId("turn-1"),
+        itemId: asItemId("spawn_1"),
+        payload: {
+          completedAtMs: 1_778_000_000_000,
+          threadId: "agent-1",
+          turnId: "turn-1",
+          item: {
+            type: "subAgentActivity",
+            id: "spawn_1",
+            kind: "failed",
+            agentPath: "/root/review_web",
+            agentThreadId: "agent-1",
+          },
+        },
+      });
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some" || firstEvent.value.type !== "item.completed") return;
+      NodeAssert.equal(firstEvent.value.payload.itemType, "collab_agent_tool_call");
+      NodeAssert.equal(firstEvent.value.payload.status, "failed");
     }),
   );
 

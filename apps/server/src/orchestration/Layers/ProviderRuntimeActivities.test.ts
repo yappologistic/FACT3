@@ -11,6 +11,56 @@ import { describe, expect, it } from "vite-plus/test";
 import { runtimeEventToActivities } from "./ProviderRuntimeIngestion.ts";
 
 describe("runtimeEventToActivities collaboration metadata", () => {
+  it.each(["claudeAgent", "openCode"] as const)(
+    "tracks %s native agent tools with a stable synthetic receiver",
+    (provider) => {
+      const started = runtimeEventToActivities({
+        type: "item.started",
+        eventId: EventId.make(`${provider}-agent-started`),
+        provider: ProviderDriverKind.make(provider),
+        threadId: ThreadId.make("thread-1"),
+        turnId: TurnId.make("turn-1"),
+        itemId: RuntimeItemId.make("native-agent-1"),
+        createdAt: "2026-08-01T00:00:00.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          data: provider === "claudeAgent" ? { toolName: "Agent" } : { tool: "task" },
+        },
+      });
+      const completed = runtimeEventToActivities({
+        type: "item.completed",
+        eventId: EventId.make(`${provider}-agent-completed`),
+        provider: ProviderDriverKind.make(provider),
+        threadId: ThreadId.make("thread-1"),
+        turnId: TurnId.make("turn-1"),
+        itemId: RuntimeItemId.make("native-agent-1"),
+        createdAt: "2026-08-01T00:00:01.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "completed",
+          data: provider === "claudeAgent" ? { toolName: "Agent" } : { tool: "task" },
+        },
+      });
+
+      const receiverId = `${provider}:tool:native-agent-1`;
+      expect(started[0]?.payload).toMatchObject({
+        collab: {
+          tool: "spawnAgent",
+          receiverThreadIds: [receiverId],
+          agentsStates: { [receiverId]: { status: "running" } },
+        },
+      });
+      expect(completed[0]?.payload).toMatchObject({
+        collab: {
+          tool: "spawnAgent",
+          receiverThreadIds: [receiverId],
+          agentsStates: { [receiverId]: { status: "completed" } },
+        },
+      });
+    },
+  );
+
   it("projects bounded agent details and a stable call id", () => {
     const event = {
       type: "item.started",
@@ -96,6 +146,43 @@ describe("runtimeEventToActivities collaboration metadata", () => {
       agentsStates: { "agent-1": { status: "running" } },
     });
   });
+
+  it.each(["completed", "failed"] as const)(
+    "preserves the terminal %s status in Codex sub-agent snapshots",
+    (kind) => {
+      const event = {
+        type: "item.completed",
+        eventId: EventId.make(`subagent-${kind}`),
+        provider: ProviderDriverKind.make("codex"),
+        threadId: ThreadId.make("thread-1"),
+        turnId: TurnId.make("turn-1"),
+        itemId: RuntimeItemId.make(`spawn-call-${kind}`),
+        createdAt: "2026-08-01T00:00:00.000Z",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          data: {
+            item: {
+              id: `spawn-call-${kind}`,
+              type: "subAgentActivity",
+              kind,
+              agentPath: "/root/review_web",
+              agentThreadId: "agent-1",
+            },
+          },
+        },
+      } satisfies ProviderRuntimeEvent;
+
+      const [activity] = runtimeEventToActivities(event);
+
+      expect(activity?.payload).toMatchObject({
+        collab: {
+          tool: "spawnAgent",
+          receiverThreadIds: ["agent-1"],
+          agentsStates: { "agent-1": { status: kind } },
+        },
+      });
+    },
+  );
 
   it("does not project root-agent interaction markers as spawned sub-agents", () => {
     const event = {

@@ -625,6 +625,58 @@ describe("ProviderCommandReactor", () => {
     }),
   );
 
+  it("overlaps provider startup across threads while preserving same-thread command order", async () => {
+    const firstStarted = Effect.runSync(Deferred.make<void>());
+    const secondStarted = Effect.runSync(Deferred.make<void>());
+    const releaseFirst = Effect.runSync(Deferred.make<void>());
+    const harness = await createHarness({
+      titleRegenerationBeforeStart: "two",
+      startSessionEffect: (session) =>
+        session.threadId === ThreadId.make("thread-1")
+          ? Deferred.succeed(firstStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseFirst)),
+              Effect.as(session),
+            )
+          : Deferred.succeed(secondStarted, undefined).pipe(Effect.as(session)),
+    });
+    const now = "2026-01-01T00:00:00.000Z";
+    const start = (threadId: ThreadId, suffix: string) =>
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make(`cmd-concurrent-start-${suffix}`),
+        threadId,
+        message: {
+          messageId: asMessageId(`message-concurrent-start-${suffix}`),
+          role: "user",
+          text: `start ${suffix}`,
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      });
+
+    await Effect.runPromise(start(ThreadId.make("thread-1"), "one"));
+    await Effect.runPromise(Deferred.await(firstStarted));
+    await Effect.runPromise(start(ThreadId.make("thread-2"), "two"));
+    await Effect.runPromise(Deferred.await(secondStarted));
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.stop",
+        commandId: CommandId.make("cmd-concurrent-stop-one"),
+        threadId: ThreadId.make("thread-1"),
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(Effect.yieldNow);
+    expect(harness.stopSession).not.toHaveBeenCalled();
+
+    await Effect.runPromise(Deferred.succeed(releaseFirst, undefined));
+    await harness.drain();
+    expect(harness.stopSession).toHaveBeenCalledTimes(1);
+  });
+
   effectIt.effect("settles a failed provider startup and allows a clean retry", () =>
     Effect.gen(function* () {
       let failStartup = true;
@@ -2292,7 +2344,18 @@ describe("ProviderCommandReactor", () => {
   });
 
   it("starts a fresh provider driver for an idle autonomous role transition", async () => {
-    const harness = await createHarness({ automated: true });
+    const claudeStartEntered = Effect.runSync(Deferred.make<void>());
+    const releaseClaudeStart = Effect.runSync(Deferred.make<void>());
+    const harness = await createHarness({
+      automated: true,
+      startSessionEffect: (session) =>
+        session.provider === ProviderDriverKind.make("claudeAgent")
+          ? Deferred.succeed(claudeStartEntered, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseClaudeStart)),
+              Effect.as(session),
+            )
+          : Effect.succeed(session),
+    });
     const firstAt = "2026-01-01T00:00:00.000Z";
     const secondAt = "2026-01-01T00:01:00.000Z";
 
@@ -2353,6 +2416,18 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
+    await Effect.runPromise(Deferred.await(claudeStartEntered));
+    const startingReadModel = await harness.readModel();
+    const startingThread = startingReadModel.threads.find(
+      (entry) => entry.id === ThreadId.make("thread-1"),
+    );
+    expect(startingThread?.session).toMatchObject({
+      status: "starting",
+      providerName: "claudeAgent",
+      providerInstanceId: "claudeAgent",
+    });
+
+    await Effect.runPromise(Deferred.succeed(releaseClaudeStart, undefined));
     await waitFor(() => harness.sendTurn.mock.calls.length === 2);
     await harness.drain();
     expect(harness.startSession.mock.calls.length).toBe(2);
@@ -2915,7 +2990,8 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await waitFor(() => harness.stopSession.mock.calls.length === 1);
+    await harness.drain();
+    expect(harness.stopSession).toHaveBeenCalledTimes(1);
     const readModel = await harness.readModel();
     const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
     expect(thread?.session).not.toBeNull();

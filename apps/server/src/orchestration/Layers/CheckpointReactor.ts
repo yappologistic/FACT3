@@ -414,9 +414,10 @@ const make = Effect.gen(function* () {
     },
   );
 
-  // Captures a real git checkpoint when a placeholder checkpoint (status "missing")
-  // is detected via a domain event. This replaces the placeholder with a real
-  // git-ref-based checkpoint.
+  // Captures a provisional git checkpoint when a placeholder checkpoint
+  // (status "missing") is detected via a domain event. The status intentionally
+  // remains "missing" so turn.completed refreshes this same ref with the final
+  // filesystem state instead of mistaking a mid-turn diff for a completed turn.
   //
   // ProviderRuntimeIngestion creates placeholder checkpoints on turn.diff.updated
   // events from the Codex runtime. This handler fires when the corresponding
@@ -427,8 +428,13 @@ const make = Effect.gen(function* () {
   ) {
     const { threadId, turnId, checkpointTurnCount, status } = event.payload;
 
-    // Only replace placeholders; skip events from our own real captures.
+    // Only replace provider placeholders; skip unrelated domain checkpoints and
+    // events from our own canonical captures.
     if (status !== "missing") {
+      return;
+    }
+    const targetCheckpointRef = checkpointRefForThreadTurn(threadId, checkpointTurnCount);
+    if (event.payload.checkpointRef === targetCheckpointRef) {
       return;
     }
 
@@ -470,7 +476,7 @@ const make = Effect.gen(function* () {
       thread,
       cwd: checkpointCwd,
       turnCount: checkpointTurnCount,
-      status: "ready",
+      status: "missing",
       assistantMessageId: event.payload.assistantMessageId ?? undefined,
       createdAt: event.payload.completedAt,
     });
@@ -759,11 +765,9 @@ const make = Effect.gen(function* () {
       return;
     }
 
-    // When ProviderRuntimeIngestion creates a placeholder checkpoint (status "missing")
-    // from a turn.diff.updated runtime event, capture the real git checkpoint to
-    // replace it. The providerService.streamEvents PubSub does not reliably deliver
-    // turn.completed runtime events to this reactor (shared subscription), so
-    // reacting to the domain event is the reliable path.
+    // When ProviderRuntimeIngestion creates a placeholder checkpoint (status
+    // "missing") from a turn.diff.updated runtime event, capture the provisional
+    // git state while the direct runtime subscription owns final turn completion.
     if (event.type === "thread.turn-diff-completed") {
       yield* captureCheckpointFromPlaceholder(event).pipe(
         Effect.catch((error) =>

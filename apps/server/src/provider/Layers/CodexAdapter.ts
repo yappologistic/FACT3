@@ -500,6 +500,35 @@ function mapItemLifecycle(
   };
 }
 
+function mapSyntheticSubagentTerminalLifecycle(
+  event: ProviderEvent,
+  canonicalThreadId: ThreadId,
+): ProviderRuntimeEvent | undefined {
+  const payload = asRecord(event.payload);
+  const item = asRecord(payload?.item);
+  if (item?.type !== "subAgentActivity") {
+    return undefined;
+  }
+  const kind = item.kind;
+  if (kind !== "completed" && kind !== "failed") {
+    return undefined;
+  }
+
+  // `completed` and `failed` are internal terminal markers synthesized by
+  // CodexSessionRuntime. The upstream Codex schema only models the native
+  // started/interacted/interrupted variants, so decoding these markers with
+  // V2ItemCompletedNotification would discard them before projection.
+  return {
+    ...runtimeEventBase(event, canonicalThreadId),
+    type: "item.completed",
+    payload: {
+      itemType: "collab_agent_tool_call",
+      status: kind === "failed" ? "failed" : "completed",
+      ...(event.payload !== undefined ? { data: event.payload } : {}),
+    },
+  };
+}
+
 function mapToRuntimeEvents(
   event: ProviderEvent,
   canonicalThreadId: ThreadId,
@@ -878,6 +907,13 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "item/completed") {
+    const syntheticSubagentTerminal = mapSyntheticSubagentTerminalLifecycle(
+      event,
+      canonicalThreadId,
+    );
+    if (syntheticSubagentTerminal) {
+      return [syntheticSubagentTerminal];
+    }
     const payload = readPayload(EffectCodexSchema.V2ItemCompletedNotification, event.payload);
     const item = payload?.item;
     if (!item) {
@@ -1511,7 +1547,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents);
           }),
-        ).pipe(Effect.forkChild);
+        ).pipe(Effect.forkIn(sessionScope));
 
         const started = yield* runtime.start().pipe(
           Effect.mapError(

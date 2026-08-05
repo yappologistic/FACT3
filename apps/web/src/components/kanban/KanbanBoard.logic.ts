@@ -80,6 +80,17 @@ export function isAutomaticWorkflowCoordinator(
   );
 }
 
+export function isCancellableAutomaticWorkflowCoordinator(
+  automation: EnvironmentThreadShell["automation"],
+): boolean {
+  return Boolean(
+    automation?.taskKind === "planning" &&
+    automation.workflowConfig?.mode === "automatic" &&
+    automation.stage !== "complete" &&
+    automation.stage !== "cancelled",
+  );
+}
+
 export function isKanbanReviewDeliveryReady(input: {
   readonly taskKind: "implementation" | "planning" | undefined;
   readonly workflowIntegration: boolean;
@@ -349,13 +360,44 @@ export function incompleteAutomationDependencies(
   });
 }
 
-function normalizedScopePrefix(scope: string): string | null {
+interface NormalizedScopePrefix {
+  readonly prefix: string;
+  readonly wildcardStartsSegment: boolean;
+}
+
+function normalizedScopePrefix(scope: string): NormalizedScopePrefix | null {
   const normalized = scope.trim().replaceAll("\\", "/").replace(/^\.\//, "");
   const wildcard = normalized.search(/[?*{[]/);
-  const prefix = (wildcard === -1 ? normalized : normalized.slice(0, wildcard))
-    .replace(/\/+$/, "")
-    .trim();
-  return prefix.length > 0 ? prefix.toLowerCase() : null;
+  const rawPrefix = wildcard === -1 ? normalized : normalized.slice(0, wildcard);
+  const prefix = rawPrefix.replace(/\/+$/, "").trim();
+  return prefix.length > 0
+    ? {
+        prefix: prefix.toLowerCase(),
+        wildcardStartsSegment: wildcard !== -1 && (wildcard === 0 || rawPrefix.endsWith("/")),
+      }
+    : null;
+}
+
+function scopePrefixesOverlap(left: NormalizedScopePrefix, right: NormalizedScopePrefix): boolean {
+  if (
+    left.prefix === right.prefix ||
+    left.prefix.startsWith(`${right.prefix}/`) ||
+    right.prefix.startsWith(`${left.prefix}/`)
+  ) {
+    return true;
+  }
+  if (!left.wildcardStartsSegment && right.prefix.startsWith(left.prefix)) return true;
+  if (!right.wildcardStartsSegment && left.prefix.startsWith(right.prefix)) return true;
+  return false;
+}
+
+function automationScopesOverlap(left: string, right: string): boolean {
+  const leftPrefix = normalizedScopePrefix(left);
+  const rightPrefix = normalizedScopePrefix(right);
+  // A leading wildcard has no safe disjoint prefix. Serialize it with every
+  // other active scope instead of risking concurrent edits to the same file.
+  if (leftPrefix === null || rightPrefix === null) return true;
+  return scopePrefixesOverlap(leftPrefix, rightPrefix);
 }
 
 export function automationConflictBlockers(
@@ -372,18 +414,56 @@ export function automationConflictBlockers(
       return false;
     }
     const candidateScopes = candidate.automation.changeScopes;
-    return scopes.some((scope) => {
-      const left = normalizedScopePrefix(scope);
-      if (left === null) return false;
-      return candidateScopes.some((candidateScope) => {
-        const right = normalizedScopePrefix(candidateScope);
-        return (
-          right !== null &&
-          (left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`))
-        );
-      });
-    });
+    return scopes.some((scope) =>
+      candidateScopes.some((candidateScope) => automationScopesOverlap(scope, candidateScope)),
+    );
   });
+}
+
+export function kanbanStateLabelsByThreadId(
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+): ReadonlyMap<string, string> {
+  const knownIds = new Set(threads.map((thread) => thread.id));
+  const completeIds = new Set(
+    threads
+      .filter(
+        (thread) =>
+          thread.automation?.stage === "complete" ||
+          isAutomaticWorkflowCoordinator(thread.automation),
+      )
+      .map((thread) => thread.id),
+  );
+  const active = threads.filter(
+    (thread) =>
+      thread.automation?.stage === "running" || thread.automation?.stage === "needs-input",
+  );
+  const labels = new Map<string, string>();
+
+  for (const thread of threads) {
+    const automation = thread.automation;
+    if (automation?.stage === "ready") {
+      const blockedCount = automation.dependencies.reduce(
+        (count, dependencyId) =>
+          count + (!knownIds.has(dependencyId) || completeIds.has(dependencyId) ? 0 : 1),
+        0,
+      );
+      if (blockedCount > 0) {
+        labels.set(
+          thread.id,
+          `Blocked by ${blockedCount} ${blockedCount === 1 ? "task" : "tasks"}`,
+        );
+        continue;
+      }
+      const conflict = automationConflictBlockers(thread, active)[0];
+      if (conflict) {
+        labels.set(thread.id, `Waiting for ${conflict.title}`);
+        continue;
+      }
+    }
+    labels.set(thread.id, describeKanbanThreadState(thread));
+  }
+
+  return labels;
 }
 
 export function capCompletedKanbanThreads(

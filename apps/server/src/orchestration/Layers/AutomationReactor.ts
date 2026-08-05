@@ -15,6 +15,7 @@ import {
   parseAutomationIntegrationReport,
   parseAutomationPlan,
   parseAutomationVerificationReport,
+  type AutomationFinalAuditReport,
   type AutomationPlan,
   type AutomationVerificationReport,
 } from "@t3tools/shared/automationPlan";
@@ -49,11 +50,16 @@ import {
   automationRetryDecision,
   automationStuckDeadline,
   buildAutomationPrompt,
+  buildAutomationWorkflowEvidence,
   resolveAutomationDependencyBranches,
   selectRunnableAutomationTasks,
 } from "../AutomationReactor.logic.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+
+// Automatic workflow agents run only in FACT3-owned isolated worktrees. The
+// server remains responsible for verification and guarded base promotion.
+export const AUTOMATIC_WORKFLOW_RUNTIME_MODE = "full-access" as const;
 
 class AutomationDependencyMaterializationError extends Data.TaggedError(
   "AutomationDependencyMaterializationError",
@@ -115,6 +121,22 @@ export function hasBlockingRequest(thread: OrchestrationThread): boolean {
   return open.size > 0;
 }
 
+export function automationCheckpointCapturePending(
+  thread: OrchestrationThread,
+  checkpoint: OrchestrationThread["checkpoints"][number],
+): boolean {
+  if (checkpoint.status !== "missing" || thread.latestTurn?.state === "interrupted") {
+    return false;
+  }
+  const heartbeat = thread.automation?.lastHeartbeatAt;
+  return !thread.activities.some(
+    (activity) =>
+      activity.kind === "checkpoint.capture.failed" &&
+      (heartbeat === null || heartbeat === undefined || activity.createdAt >= heartbeat) &&
+      (activity.turnId === null || activity.turnId === checkpoint.turnId),
+  );
+}
+
 function latestAssistantText(thread: OrchestrationThread): string | null {
   const heartbeat = thread.automation?.lastHeartbeatAt;
   return (
@@ -148,6 +170,24 @@ export function workflowThreadId(workflowId: ThreadId, taskKey: string): ThreadI
   return ThreadId.make(`${workflowId}:automation:${encodeURIComponent(taskKey)}`);
 }
 
+export function nextFinalAuditRepairCycle(workflowTaskKey: string | null): number {
+  const priorCycle = workflowTaskKey?.match(/^__final_audit__repair_(\d+)$/)?.[1];
+  return priorCycle ? Number(priorCycle) + 1 : 1;
+}
+
+function latestWorkflowFinalAudit(
+  workflowId: ThreadId,
+  threads: ReadonlyArray<OrchestrationThread>,
+): OrchestrationThread | undefined {
+  return threads
+    .filter(
+      (thread) =>
+        thread.automation?.workflowId === workflowId &&
+        thread.automation.workflowTaskKey?.startsWith("__final_audit__") === true,
+    )
+    .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+}
+
 export function staleWorkflowThreads(input: {
   readonly workflowId: ThreadId;
   readonly projectId: ProjectId;
@@ -161,6 +201,42 @@ export function staleWorkflowThreads(input: {
       thread.id.startsWith(workflowPrefix) &&
       !input.acceptedIds.has(thread.id) &&
       (thread.automation === undefined || thread.automation.workflowId === input.workflowId),
+  );
+}
+
+export function activeWorkflowThreadsForCancellation(input: {
+  readonly workflowId: ThreadId;
+  readonly projectId: ProjectId;
+  readonly threads: ReadonlyArray<OrchestrationThread>;
+}): ReadonlyArray<OrchestrationThread> {
+  return input.threads.filter(
+    (thread) =>
+      thread.projectId === input.projectId &&
+      thread.automation?.workflowId === input.workflowId &&
+      thread.automation.stage !== "complete" &&
+      thread.automation.stage !== "cancelled",
+  );
+}
+
+export function completedFinalAuditCanRecoverCoordinator(input: {
+  readonly coordinator: OrchestrationThread;
+  readonly finalAudit: OrchestrationThread;
+}): boolean {
+  const coordinatorAutomation = input.coordinator.automation;
+  const auditAutomation = input.finalAudit.automation;
+  if (
+    coordinatorAutomation?.taskKind !== "planning" ||
+    coordinatorAutomation.workflowConfig?.mode !== "automatic" ||
+    auditAutomation?.workflowId !== input.coordinator.id ||
+    auditAutomation.workflowTaskKey !== "__final_audit__" ||
+    auditAutomation.stage !== "complete"
+  ) {
+    return false;
+  }
+  return (
+    (coordinatorAutomation.stage === "review" || coordinatorAutomation.stage === "failed") &&
+    auditAutomation.completedAt !== null &&
+    auditAutomation.completedAt >= coordinatorAutomation.updatedAt
   );
 }
 
@@ -262,6 +338,18 @@ const make = Effect.gen(function* () {
       updatedAt,
     });
   });
+
+  const completeWorkflowCoordinator = Effect.fn("AutomationReactor.completeWorkflowCoordinator")(
+    function* (thread: OrchestrationThread, completedAt: string) {
+      yield* transition({
+        thread,
+        stage: "complete",
+        leaseExpiresAt: null,
+        lastError: null,
+        completedAt,
+      });
+    },
+  );
 
   let enqueueProject: ((projectId: ProjectId) => Effect.Effect<void>) | null = null;
   const scheduleLease = Effect.fn("AutomationReactor.scheduleLease")(function* (
@@ -476,19 +564,19 @@ const make = Effect.gen(function* () {
         id: taskIds.get(task.key)!,
         title: task.title,
         modelSelection: workflowConfig.roles[task.role],
-        runtimeMode: "full-access" as const,
+        runtimeMode: AUTOMATIC_WORKFLOW_RUNTIME_MODE,
       })),
       {
         id: integrationId,
         title: `Integrate: ${input.root.title}`,
         modelSelection: workflowConfig.roles.integrator,
-        runtimeMode: "full-access" as const,
+        runtimeMode: AUTOMATIC_WORKFLOW_RUNTIME_MODE,
       },
       {
         id: finalAuditId,
         title: `Final audit: ${input.root.title}`,
         modelSelection: workflowConfig.roles.orchestrator,
-        runtimeMode: "approval-required" as const,
+        runtimeMode: AUTOMATIC_WORKFLOW_RUNTIME_MODE,
       },
     ];
     const acceptedIds = new Set<ThreadId>(threadSpecs.map((spec) => spec.id));
@@ -733,6 +821,193 @@ const make = Effect.gen(function* () {
       acceptedIds,
     });
   });
+
+  const routeFinalAuditRepairs = Effect.fn("AutomationReactor.routeFinalAuditRepairs")(
+    function* (input: {
+      readonly audit: OrchestrationThread;
+      readonly project: OrchestrationProject;
+      readonly policy: OrchestrationProjectAutomationPolicy;
+      readonly report: AutomationFinalAuditReport;
+      readonly tasks: ReadonlyArray<OrchestrationThread>;
+    }) {
+      const auditAutomation = input.audit.automation!;
+      if (input.report.followUpTasks.length === 0 || auditAutomation.workflowId === null) {
+        return yield* new AutomationWorkflowMaterializationError({
+          message:
+            "A repair-required final audit must provide at least one bounded follow-up task.",
+        });
+      }
+      const root = input.tasks.find((thread) => thread.id === auditAutomation.workflowId);
+      const integration = input.tasks.find(
+        (thread) =>
+          thread.automation?.workflowId === auditAutomation.workflowId &&
+          thread.automation.workflowTaskKey === "__integration__",
+      );
+      const workflowConfig = root?.automation?.workflowConfig;
+      if (!root?.automation || !integration?.automation || !workflowConfig || !integration.branch) {
+        return yield* new AutomationWorkflowMaterializationError({
+          message:
+            "The final audit repair could not resolve a completed integration branch and workflow configuration.",
+        });
+      }
+
+      const createdAt = yield* nowIso;
+      const repairCycle = nextFinalAuditRepairCycle(auditAutomation.workflowTaskKey);
+      const repairIds = input.report.followUpTasks.map((_, index) =>
+        workflowThreadId(root.id, `__repair_${repairCycle}_${index + 1}`),
+      );
+      const currentModel = yield* snapshots.getCommandReadModel();
+      const existingIds = new Set(currentModel.threads.map((thread) => thread.id));
+
+      for (const [index, repair] of input.report.followUpTasks.entries()) {
+        const threadId = repairIds[index]!;
+        const key = `__repair_${repairCycle}_${index + 1}`;
+        if (!existingIds.has(threadId)) {
+          yield* engine.dispatch({
+            type: "thread.create",
+            commandId: yield* serverCommandId("workflow-repair-thread"),
+            threadId,
+            projectId: input.project.id,
+            title: repair.title,
+            modelSelection: workflowConfig.roles[repair.role],
+            runtimeMode: AUTOMATIC_WORKFLOW_RUNTIME_MODE,
+            interactionMode: "default",
+            branch: integration.branch,
+            worktreePath: null,
+            createdAt,
+          });
+        }
+        const projected = (yield* snapshots.getCommandReadModel()).threads.find(
+          (thread) => thread.id === threadId,
+        );
+        if (!projected?.automation) {
+          yield* engine.dispatch({
+            type: "thread.automation.configure",
+            commandId: yield* serverCommandId("workflow-repair"),
+            threadId,
+            automation: {
+              taskKind: "implementation",
+              workflowId: root.id,
+              workflowTaskKey: key,
+              role: repair.role,
+              goal: repair.goal,
+              acceptanceCriteria: [
+                ...input.report.failedCriteria,
+                `Final-audit repair: ${repair.goal}`,
+              ],
+              dependencies: [root.id],
+              changeScopes: ["**/*"],
+              baseBranch: integration.branch,
+              stage: "ready",
+              phase: "implementation",
+              attempt: 0,
+              maxAttempts: input.policy.defaultMaxAttempts,
+              maxRuntimeMinutes: input.policy.defaultMaxRuntimeMinutes,
+              leaseExpiresAt: null,
+              lastHeartbeatAt: null,
+              lastError: null,
+              feedback: input.report.summary,
+              verification: { status: "pending", summary: null, evidence: [], completedAt: null },
+              startedAt: null,
+              completedAt: null,
+              createdAt,
+              updatedAt: createdAt,
+            },
+            updatedAt: createdAt,
+          });
+        }
+      }
+
+      yield* engine.dispatch({
+        type: "thread.automation.configure",
+        commandId: yield* serverCommandId("workflow-repair-integration"),
+        threadId: integration.id,
+        automation: {
+          ...integration.automation,
+          goal: `Integrate the verified final-audit repairs into the prior integrated result.\n\n${input.report.summary}`,
+          acceptanceCriteria: [
+            "Every final-audit repair branch is merged into the integration branch.",
+            "The repaired combined result is clean, committed, and passes focused integration checks.",
+          ],
+          dependencies: repairIds,
+          stage: "ready",
+          phase: "implementation",
+          attempt: 0,
+          leaseExpiresAt: null,
+          lastHeartbeatAt: null,
+          lastError: null,
+          feedback: input.report.summary,
+          verification: { status: "pending", summary: null, evidence: [], completedAt: null },
+          startedAt: null,
+          completedAt: null,
+          updatedAt: createdAt,
+        },
+        updatedAt: createdAt,
+      });
+
+      const nextAuditKey = `__final_audit__repair_${repairCycle}`;
+      const nextAuditId = workflowThreadId(root.id, nextAuditKey);
+      if (!existingIds.has(nextAuditId)) {
+        yield* engine.dispatch({
+          type: "thread.create",
+          commandId: yield* serverCommandId("workflow-repair-audit-thread"),
+          threadId: nextAuditId,
+          projectId: input.project.id,
+          title: `Final audit after repair: ${root.title}`,
+          modelSelection: workflowConfig.roles.orchestrator,
+          runtimeMode: AUTOMATIC_WORKFLOW_RUNTIME_MODE,
+          interactionMode: "default",
+          branch: root.automation.baseBranch,
+          worktreePath: null,
+          createdAt,
+        });
+      }
+      const projectedAudit = (yield* snapshots.getCommandReadModel()).threads.find(
+        (thread) => thread.id === nextAuditId,
+      );
+      if (!projectedAudit?.automation) {
+        yield* engine.dispatch({
+          type: "thread.automation.configure",
+          commandId: yield* serverCommandId("workflow-repair-audit"),
+          threadId: nextAuditId,
+          automation: {
+            taskKind: "implementation",
+            workflowId: root.id,
+            workflowTaskKey: nextAuditKey,
+            role: "orchestrator",
+            goal: root.automation.goal,
+            acceptanceCriteria: root.automation.acceptanceCriteria,
+            dependencies: [integration.id],
+            changeScopes: [],
+            baseBranch: root.automation.baseBranch,
+            stage: "ready",
+            phase: "implementation",
+            attempt: 0,
+            maxAttempts: input.policy.defaultMaxAttempts,
+            maxRuntimeMinutes: input.policy.defaultMaxRuntimeMinutes,
+            leaseExpiresAt: null,
+            lastHeartbeatAt: null,
+            lastError: null,
+            feedback: `Re-audit after verified repairs: ${input.report.summary}`,
+            verification: { status: "pending", summary: null, evidence: [], completedAt: null },
+            startedAt: null,
+            completedAt: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+          updatedAt: createdAt,
+        });
+      }
+
+      yield* transition({
+        thread: input.audit,
+        stage: "cancelled",
+        leaseExpiresAt: null,
+        lastError: `Repairs routed: ${input.report.summary}`,
+        completedAt: createdAt,
+      });
+    },
+  );
 
   const validateCompletedTaskBranch = Effect.fn("AutomationReactor.validateCompletedTaskBranch")(
     function* (thread: OrchestrationThread) {
@@ -983,34 +1258,54 @@ const make = Effect.gen(function* () {
           "Autonomous workflow requires dedicated worktrees and verification before an agent can run.",
       });
     }
+    let thread = input.thread;
+    if (
+      thread.automation?.workflowId !== null &&
+      thread.runtimeMode !== AUTOMATIC_WORKFLOW_RUNTIME_MODE
+    ) {
+      yield* engine.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: yield* serverCommandId("workflow-runtime-mode"),
+        threadId: thread.id,
+        runtimeMode: AUTOMATIC_WORKFLOW_RUNTIME_MODE,
+        createdAt: yield* nowIso,
+      });
+      thread = { ...thread, runtimeMode: AUTOMATIC_WORKFLOW_RUNTIME_MODE };
+    }
     if (input.phase === "implementation") {
-      yield* prepareWorktree(input);
+      yield* prepareWorktree({ ...input, thread });
     }
     const currentModel = yield* snapshots.getCommandReadModel();
-    const workflowRoot = input.thread.automation?.workflowId
-      ? currentModel.threads.find(
-          (candidate) => candidate.id === input.thread.automation!.workflowId,
-        )
+    const workflowRoot = thread.automation?.workflowId
+      ? currentModel.threads.find((candidate) => candidate.id === thread.automation!.workflowId)
       : undefined;
     const dependencyBranches =
-      input.thread.automation?.role === "integrator"
+      thread.automation?.role === "integrator"
         ? resolveAutomationDependencyBranches({
-            thread: input.thread,
+            thread,
             tasks: currentModel.threads,
           }).branches
         : [];
+    const workflowEvidence =
+      thread.automation?.role === "orchestrator" && workflowRoot
+        ? buildAutomationWorkflowEvidence({
+            workflowId: workflowRoot.id,
+            excludeThreadId: thread.id,
+            threads: currentModel.threads,
+          })
+        : null;
     const startedAt = yield* nowIso;
     const expiresAt = DateTime.formatIso(
       DateTime.add(DateTime.makeUnsafe(startedAt), {
-        minutes: input.thread.automation!.maxRuntimeMinutes,
+        minutes: thread.automation!.maxRuntimeMinutes,
       }),
     );
     const attempt =
       input.phase === "implementation"
-        ? input.thread.automation!.attempt + 1
-        : input.thread.automation!.attempt;
+        ? thread.automation!.attempt + 1
+        : thread.automation!.attempt;
     yield* transition({
-      thread: input.thread,
+      thread,
       stage: "running",
       phase: input.phase,
       attempt,
@@ -1030,9 +1325,9 @@ const make = Effect.gen(function* () {
         : {}),
     });
     const transitionedThread: OrchestrationThread = {
-      ...input.thread,
+      ...thread,
       automation: {
-        ...input.thread.automation!,
+        ...thread.automation!,
         stage: "running",
         phase: input.phase,
         attempt,
@@ -1054,13 +1349,14 @@ const make = Effect.gen(function* () {
             ...input,
             thread: transitionedThread,
             dependencyBranches,
+            workflowEvidence,
           }),
           attachments: [],
         },
-        modelSelection: workflowModelSelection(input.thread, input.phase, workflowRoot),
-        titleSeed: input.thread.title,
-        runtimeMode: input.thread.runtimeMode,
-        interactionMode: input.thread.interactionMode,
+        modelSelection: workflowModelSelection(thread, input.phase, workflowRoot),
+        titleSeed: thread.title,
+        runtimeMode: thread.runtimeMode,
+        interactionMode: thread.interactionMode,
         createdAt: startedAt,
       })
       .pipe(
@@ -1133,6 +1429,21 @@ const make = Effect.gen(function* () {
         threadId: input.thread.id,
       });
     }
+    if (
+      stage === "complete" &&
+      automation.role === "orchestrator" &&
+      workflowConfig?.mode === "automatic" &&
+      workflowRoot?.automation &&
+      workflowRoot.automation.stage !== "complete" &&
+      workflowRoot.automation.stage !== "cancelled"
+    ) {
+      yield* completeWorkflowCoordinator(workflowRoot, completedAt);
+      yield* engine.dispatch({
+        type: "thread.settle",
+        commandId: yield* serverCommandId("settle-workflow-root"),
+        threadId: workflowRoot.id,
+      });
+    }
   });
 
   const reconcileProject = Effect.fn("AutomationReactor.reconcileProject")(function* (
@@ -1164,21 +1475,21 @@ const make = Effect.gen(function* () {
         : task;
       const automation = thread.automation!;
       if (
-        automation.stage === "review" &&
+        (automation.stage === "review" || automation.stage === "failed") &&
         automation.taskKind === "planning" &&
         automation.workflowConfig?.mode === "automatic"
       ) {
-        const finalAudit = tasks.find(
-          (candidate) =>
-            candidate.automation?.workflowId === thread.id &&
-            candidate.automation.workflowTaskKey === "__final_audit__",
-        );
-        if (finalAudit?.automation?.stage === "complete") {
+        const finalAudit = latestWorkflowFinalAudit(thread.id, tasks);
+        if (
+          finalAudit &&
+          completedFinalAuditCanRecoverCoordinator({ coordinator: thread, finalAudit })
+        ) {
           const completedAt = yield* nowIso;
-          yield* transition({ thread, stage: "complete", completedAt });
+          yield* completeWorkflowCoordinator(thread, completedAt);
         } else if (
-          finalAudit?.automation?.stage === "failed" ||
-          finalAudit?.automation?.stage === "cancelled"
+          automation.stage === "review" &&
+          (finalAudit?.automation?.stage === "failed" ||
+            finalAudit?.automation?.stage === "cancelled")
         ) {
           const completedAt = yield* nowIso;
           yield* transition({
@@ -1190,9 +1501,36 @@ const make = Effect.gen(function* () {
             completedAt,
           });
         }
-        continue;
+        if (automation.stage === "review" || finalAudit?.automation?.stage === "complete") {
+          continue;
+        }
       }
       if (automation.stage === "complete" || automation.stage === "cancelled") {
+        if (
+          automation.stage === "cancelled" &&
+          automation.taskKind === "planning" &&
+          automation.workflowConfig?.mode === "automatic"
+        ) {
+          const descendants = activeWorkflowThreadsForCancellation({
+            workflowId: thread.id,
+            projectId,
+            threads: tasks,
+          });
+          if (descendants.length > 0) {
+            const cancelledAt = yield* nowIso;
+            yield* Effect.forEach(descendants, (descendant) =>
+              transition({
+                thread: descendant,
+                stage: "cancelled",
+                leaseExpiresAt: null,
+                completedAt: cancelledAt,
+              }),
+            );
+            // Each transition queues another reconciliation. Stop this pass so
+            // stale pre-cancellation task snapshots cannot dispatch new work.
+            return;
+          }
+        }
         if (thread.session?.status === "starting" || thread.session?.status === "running") {
           const interruptedAt = yield* nowIso;
           yield* engine.dispatch({
@@ -1384,6 +1722,9 @@ const make = Effect.gen(function* () {
       ) {
         continue;
       }
+      if (automationCheckpointCapturePending(thread, checkpoint)) {
+        continue;
+      }
       if (checkpoint.status !== "ready" || thread.latestTurn?.state === "interrupted") {
         yield* retryOrFail({
           thread,
@@ -1408,6 +1749,15 @@ const make = Effect.gen(function* () {
         continue;
       }
       if (automation.role === "orchestrator" && automation.phase === "implementation") {
+        if (checkpoint.files.length > 0) {
+          yield* retryOrFail({
+            thread,
+            detail:
+              "The final orchestrator modified integrated files. Final audit must remain read-only so unreviewed changes cannot bypass workflow integration.",
+            retryPhase: "implementation",
+          });
+          continue;
+        }
         const reportText = latestAssistantText(thread);
         const report = reportText ? parseAutomationFinalAuditReport(reportText) : null;
         if (!report) {
@@ -1418,19 +1768,27 @@ const make = Effect.gen(function* () {
           });
           continue;
         }
-        if (report.status !== "complete") {
-          yield* retryOrFail({
+        if (report.status === "needs-input") {
+          yield* transition({
             thread,
-            detail: [
-              `Final orchestrator verdict: ${report.status}. ${report.summary}`,
-              ...report.failedCriteria.map((criterion) => `Failed criterion: ${criterion}`),
-              ...report.remainingRisks.map((risk) => `Remaining risk: ${risk}`),
-              ...report.followUpTasks.map(
-                (task) => `Follow-up (${task.role}): ${task.title} — ${task.goal}`,
-              ),
-            ].join("\n"),
-            retryPhase: "implementation",
+            stage: "needs-input",
+            leaseExpiresAt: null,
+            lastError: `Final orchestrator needs input: ${report.summary}`,
+            feedback: report.summary,
+            completedAt: null,
           });
+          continue;
+        }
+        if (report.status === "repair-required") {
+          yield* routeFinalAuditRepairs({ audit: thread, project, policy, report, tasks }).pipe(
+            Effect.catchCause((cause) =>
+              retryOrFail({
+                thread,
+                detail: Cause.pretty(cause),
+                retryPhase: "implementation",
+              }),
+            ),
+          );
           continue;
         }
         const completedAt = yield* nowIso;
@@ -1701,17 +2059,21 @@ const make = Effect.gen(function* () {
     process: reconcileProjectSafely,
   });
   enqueueProject = (projectId) => worker.enqueue(projectId, undefined);
+  const automationProjectByThreadId = new Map<ThreadId, ProjectId>();
 
   const projectIdForEvent = Effect.fn("AutomationReactor.projectIdForEvent")(function* (
     event: OrchestrationEvent,
   ) {
     if (event.aggregateKind === "project") return event.aggregateId as ProjectId;
-    return Option.getOrNull(
-      Option.map(
-        yield* snapshots.getThreadShellById(event.aggregateId as ThreadId),
-        (thread) => thread.projectId,
-      ),
-    );
+    const threadId = event.aggregateId as ThreadId;
+    const cachedProjectId = automationProjectByThreadId.get(threadId);
+    if (cachedProjectId) return cachedProjectId;
+    if (event.type !== "thread.automation-configured") return null;
+
+    const thread = Option.getOrNull(yield* snapshots.getThreadShellById(threadId));
+    if (!thread?.automation) return null;
+    automationProjectByThreadId.set(threadId, thread.projectId);
+    return thread.projectId;
   });
 
   const shouldReconcile = (event: OrchestrationEvent): boolean =>
@@ -1728,6 +2090,11 @@ const make = Effect.gen(function* () {
   const start: AutomationReactorShape["start"] = Effect.fn("AutomationReactor.start")(function* () {
     yield* Effect.gen(function* () {
       const initialModel = yield* snapshots.getCommandReadModel();
+      for (const thread of initialModel.threads) {
+        if (thread.automation !== undefined) {
+          automationProjectByThreadId.set(thread.id, thread.projectId);
+        }
+      }
       yield* Effect.forEach(
         initialModel.threads.filter(
           (thread) =>
@@ -1781,6 +2148,11 @@ const make = Effect.gen(function* () {
             projectIdForEvent(event).pipe(
               Effect.flatMap((projectId) =>
                 projectId === null ? Effect.void : worker.enqueue(projectId, undefined),
+              ),
+              Effect.ensuring(
+                event.type === "thread.deleted"
+                  ? Effect.sync(() => automationProjectByThreadId.delete(event.payload.threadId))
+                  : Effect.void,
               ),
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)

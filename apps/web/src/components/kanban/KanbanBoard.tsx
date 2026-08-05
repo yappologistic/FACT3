@@ -87,8 +87,10 @@ import {
   groupKanbanThreads,
   incompleteAutomationDependencies,
   isAutomaticWorkflowCoordinator,
+  isCancellableAutomaticWorkflowCoordinator,
   isKanbanThreadVerified,
   isKanbanReviewDeliveryReady,
+  kanbanStateLabelsByThreadId,
   kanbanInspectorSectionOrder,
   liveKanbanAutomation,
   parseAutomationPlan,
@@ -199,21 +201,6 @@ function resolvePlanModelSelection(
   };
 }
 
-function stateLabelForThread(
-  thread: EnvironmentThreadShell,
-  allThreads: ReadonlyArray<EnvironmentThreadShell>,
-): string {
-  const blocked = incompleteAutomationDependencies(thread, allThreads);
-  if (thread.automation?.stage === "ready" && blocked.length > 0) {
-    return `Blocked by ${blocked.length} ${blocked.length === 1 ? "task" : "tasks"}`;
-  }
-  const conflicts = automationConflictBlockers(thread, allThreads);
-  if (conflicts.length > 0) {
-    return `Waiting for ${conflicts[0]!.title}`;
-  }
-  return describeKanbanThreadState(thread);
-}
-
 function CardStateIcon(props: {
   readonly thread: EnvironmentThreadShell;
   readonly lane: KanbanActiveLane | "history";
@@ -247,12 +234,11 @@ function CardStateIcon(props: {
 
 const KanbanCard = memo(function KanbanCard(props: {
   readonly thread: EnvironmentThreadShell;
-  readonly allThreads: ReadonlyArray<EnvironmentThreadShell>;
+  readonly stateLabel: string;
   readonly lane: KanbanActiveLane | "history";
   readonly selected: boolean;
   readonly onSelect: (thread: EnvironmentThreadShell) => void;
 }) {
-  const stateLabel = stateLabelForThread(props.thread, props.allThreads);
   const subagentCount = props.thread.subagentCount ?? 0;
   const roleLabel = workflowRoleLabel(props.thread);
   const quietStateLabel =
@@ -266,7 +252,7 @@ const KanbanCard = memo(function KanbanCard(props: {
         ? `Completed ${formatRelativeTimeLabel(
             props.thread.automation?.completedAt ?? props.thread.updatedAt,
           )}`
-        : stateLabel;
+        : props.stateLabel;
   return (
     <button
       type="button"
@@ -316,7 +302,7 @@ const KanbanCard = memo(function KanbanCard(props: {
       </span>
       <span className="mt-3 flex items-center justify-between gap-3 border-t border-foreground/[0.055] pt-2.5">
         <span className="flex min-w-0 items-center gap-1.5 text-[12px] text-muted-foreground">
-          <CardStateIcon thread={props.thread} lane={props.lane} stateLabel={stateLabel} />
+          <CardStateIcon thread={props.thread} lane={props.lane} stateLabel={props.stateLabel} />
           <span className="truncate">{quietStateLabel}</span>
         </span>
         {subagentCount > 0 ? (
@@ -359,7 +345,7 @@ function LaneEmptyState({ lane }: { readonly lane: KanbanActiveLane }) {
 const KanbanLaneColumn = memo(function KanbanLaneColumn(props: {
   readonly lane: KanbanActiveLane;
   readonly threads: ReadonlyArray<EnvironmentThreadShell>;
-  readonly allThreads: ReadonlyArray<EnvironmentThreadShell>;
+  readonly stateLabelsByThreadId: ReadonlyMap<string, string>;
   readonly compact: boolean;
   readonly hiddenCount?: number;
   readonly selectedKey: string | null;
@@ -404,7 +390,9 @@ const KanbanLaneColumn = memo(function KanbanLaneColumn(props: {
               <KanbanCard
                 key={kanbanThreadKey(thread)}
                 thread={thread}
-                allThreads={props.allThreads}
+                stateLabel={
+                  props.stateLabelsByThreadId.get(thread.id) ?? describeKanbanThreadState(thread)
+                }
                 lane={props.lane}
                 selected={props.selectedKey === kanbanThreadKey(thread)}
                 onSelect={props.onSelect}
@@ -658,6 +646,7 @@ function KanbanInspector(props: {
   readonly project: EnvironmentProject;
   readonly threadShell: EnvironmentThreadShell;
   readonly allThreads: ReadonlyArray<EnvironmentThreadShell>;
+  readonly stateLabel: string;
   readonly lane: KanbanActiveLane | "history";
   readonly onOpenThread: (thread: EnvironmentThreadShell) => void;
   readonly onOpenDiff: (thread: EnvironmentThreadShell, scope: "branch" | "unstaged") => void;
@@ -882,6 +871,48 @@ function KanbanInspector(props: {
     if (result._tag === "Failure") showLifecycleError();
   }, [props.lane, settleThread, threadRef, unarchiveThread, unsettleThread]);
 
+  const reopenAutomation = useCallback(async () => {
+    if (!automation) return;
+    setLifecyclePending(true);
+    if (props.threadShell.archivedAt !== null) {
+      const unarchiveResult = await unarchiveThread(threadRef);
+      if (unarchiveResult._tag === "Failure") {
+        setLifecyclePending(false);
+        showLifecycleError();
+        return;
+      }
+    }
+    const result = await transitionAutomation({
+      environmentId: props.threadShell.environmentId,
+      input: {
+        threadId: props.threadShell.id,
+        expectedStage: automation.stage,
+        stage: "ready",
+        phase: "implementation",
+        attempt: 0,
+        feedback: null,
+        completedAt: null,
+        lastError: null,
+        verification: {
+          status: "pending",
+          summary: null,
+          evidence: [],
+          completedAt: null,
+        },
+      },
+    });
+    setLifecyclePending(false);
+    if (result._tag === "Failure") showLifecycleError();
+  }, [
+    automation,
+    props.threadShell.archivedAt,
+    props.threadShell.environmentId,
+    props.threadShell.id,
+    threadRef,
+    transitionAutomation,
+    unarchiveThread,
+  ]);
+
   const approveProposedExecution = useCallback(async () => {
     if (
       !automation ||
@@ -1095,10 +1126,11 @@ function KanbanInspector(props: {
   const workflowIntegrationReview =
     automation?.workflowId !== null && automation?.role === "integrator";
   const automaticWorkflowCoordinator = isAutomaticWorkflowCoordinator(automation);
+  const cancellableWorkflowCoordinator = isCancellableAutomaticWorkflowCoordinator(automation);
   const reviewDeliveryReady = isKanbanReviewDeliveryReady({
     taskKind: automation?.taskKind,
     workflowIntegration: workflowIntegrationReview,
-    gitStatusAvailable: gitStatus.data != null,
+    gitStatusAvailable: gitStatus.data != null && gitStatus.error == null,
     hasWorkingTreeChanges: gitStatus.data?.hasWorkingTreeChanges ?? false,
     deliveryMode: policy.deliveryMode,
     pullRequestOpen: gitStatus.data?.pr?.state === "open",
@@ -1138,26 +1170,18 @@ function KanbanInspector(props: {
                   label: "Retry",
                   Icon: RotateCcwIcon,
                   run: () =>
-                    transition("ready", { attempt: 0, lastError: null, completedAt: null }),
+                    transition("ready", {
+                      phase: "implementation",
+                      attempt: 0,
+                      lastError: null,
+                      completedAt: null,
+                    }),
                 }
               : automation.stage === "complete" || automation.stage === "cancelled"
                 ? {
                     label: "Reopen",
                     Icon: RotateCcwIcon,
-                    run: () =>
-                      transition("ready", {
-                        phase: "implementation",
-                        attempt: 0,
-                        feedback: null,
-                        completedAt: null,
-                        lastError: null,
-                        verification: {
-                          status: "pending",
-                          summary: null,
-                          evidence: [],
-                          completedAt: null,
-                        },
-                      }),
+                    run: reopenAutomation,
                   }
                 : null
     : null;
@@ -1329,7 +1353,7 @@ function KanbanInspector(props: {
             automation.stage === "failed" && "text-destructive",
           )}
         >
-          {stateLabelForThread(props.threadShell, props.allThreads)}
+          {props.stateLabel}
         </dd>
         {automation.workflowId ? (
           <>
@@ -1728,7 +1752,7 @@ function KanbanInspector(props: {
               Pause
             </Button>
           ) : null}
-          {automation?.stage === "running" ? (
+          {automation?.stage === "running" || cancellableWorkflowCoordinator ? (
             <Button
               className="col-span-2"
               variant="destructive-outline"
@@ -1865,7 +1889,7 @@ function HistoryBoard(props: {
                 <KanbanCard
                   key={kanbanThreadKey(thread)}
                   thread={thread}
-                  allThreads={threads}
+                  stateLabel={describeKanbanThreadState(thread)}
                   lane="history"
                   selected={props.selectedKey === kanbanThreadKey(thread)}
                   onSelect={props.onSelect}
@@ -1991,6 +2015,10 @@ export function KanbanBoard(props: {
 }) {
   const now = useMemo(() => new Date().toISOString(), [props.threads, props.archivedThreads]);
   const lanes = useMemo(() => groupKanbanThreads(props.threads, now), [now, props.threads]);
+  const stateLabelsByThreadId = useMemo(
+    () => kanbanStateLabelsByThreadId(props.threads),
+    [props.threads],
+  );
   const completed = lanes.find((lane) => lane.id === "complete")?.threads ?? [];
   const completedCap = useMemo(() => capCompletedKanbanThreads(completed, 4), [completed]);
   const visibleLanes = useMemo(
@@ -2087,7 +2115,7 @@ export function KanbanBoard(props: {
                 key={lane.id}
                 lane={lane.id}
                 threads={lane.threads}
-                allThreads={props.threads}
+                stateLabelsByThreadId={stateLabelsByThreadId}
                 compact={lane.threads.length === 0}
                 hiddenCount={lane.id === "complete" ? completedCap.overflow.length : 0}
                 selectedKey={selectedKey}
@@ -2105,6 +2133,10 @@ export function KanbanBoard(props: {
           project={props.project}
           threadShell={selectedThread}
           allThreads={props.threads}
+          stateLabel={
+            stateLabelsByThreadId.get(selectedThread.id) ??
+            describeKanbanThreadState(selectedThread)
+          }
           lane={classifyKanbanThread(selectedThread, now)}
           onOpenThread={props.onOpenThread}
           onOpenDiff={props.onOpenDiff}

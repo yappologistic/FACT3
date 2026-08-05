@@ -20,6 +20,7 @@ import {
   isRecoverableThreadResumeError,
   openCodexThread,
   resolveCollabReceiverRoute,
+  shouldSuppressChildConversationNotification,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
@@ -53,6 +54,29 @@ describe("codexSubagentTerminalKind", () => {
     NodeAssert.equal(codexSubagentTerminalKind("completed"), "completed");
     NodeAssert.equal(codexSubagentTerminalKind("failed"), "failed");
     NodeAssert.equal(codexSubagentTerminalKind("interrupted"), "interrupted");
+  });
+});
+
+describe("child conversation isolation", () => {
+  it("suppresses child errors and assistant output while retaining collaboration lifecycle", () => {
+    NodeAssert.equal(
+      shouldSuppressChildConversationNotification({ method: "error", params: {} } as never),
+      true,
+    );
+    NodeAssert.equal(
+      shouldSuppressChildConversationNotification({
+        method: "item/completed",
+        params: { item: { type: "agentMessage" } },
+      } as never),
+      true,
+    );
+    NodeAssert.equal(
+      shouldSuppressChildConversationNotification({
+        method: "item/completed",
+        params: { item: { type: "collabAgentToolCall" } },
+      } as never),
+      false,
+    );
   });
 });
 
