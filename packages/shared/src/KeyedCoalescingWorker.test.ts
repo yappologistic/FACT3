@@ -51,6 +51,7 @@ describe("makeKeyedCoalescingWorker", () => {
 
         yield* Deferred.succeed(releaseSecond, undefined);
         yield* Deferred.await(drained);
+        yield* worker.drain;
 
         expect(processed).toEqual(["terminal-1:first", "terminal-1:second"]);
       }),

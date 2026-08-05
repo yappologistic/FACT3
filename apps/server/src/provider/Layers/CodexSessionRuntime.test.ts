@@ -16,6 +16,7 @@ import {
 import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
 import {
   buildTurnStartParams,
+  codexSubagentTerminalKind,
   isRecoverableThreadResumeError,
   openCodexThread,
   resolveCollabReceiverRoute,
@@ -44,6 +45,14 @@ describe("resolveCollabReceiverRoute", () => {
       resolveCollabReceiverRoute(routes, "provider-child", "provider-root"),
       route,
     );
+  });
+});
+
+describe("codexSubagentTerminalKind", () => {
+  it("preserves completed, failed, and interrupted child outcomes", () => {
+    NodeAssert.equal(codexSubagentTerminalKind("completed"), "completed");
+    NodeAssert.equal(codexSubagentTerminalKind("failed"), "failed");
+    NodeAssert.equal(codexSubagentTerminalKind("interrupted"), "interrupted");
   });
 });
 

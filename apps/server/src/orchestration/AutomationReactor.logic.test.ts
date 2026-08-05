@@ -1,5 +1,6 @@
 import {
   CheckpointRef,
+  EventId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -23,6 +24,7 @@ import {
   automationDispatchCompletion,
   automationDispatchStartExpired,
   automationFailureCanRetry,
+  automationHasActiveSubagents,
   automationIsStalled,
   automationRetryDecision,
   automationStuckDeadline,
@@ -77,6 +79,7 @@ function task(input: {
   readonly workflowId?: ThreadId | null;
   readonly acceptanceCriteria?: ReadonlyArray<string>;
   readonly branch?: string | null;
+  readonly archivedAt?: string | null;
 }): OrchestrationThread {
   const id = ThreadId.make(input.id);
   return {
@@ -91,7 +94,7 @@ function task(input: {
     latestTurn: null,
     createdAt: NOW,
     updatedAt: NOW,
-    archivedAt: null,
+    archivedAt: input.archivedAt ?? null,
     settledOverride: null,
     settledAt: null,
     snoozedUntil: null,
@@ -342,6 +345,30 @@ describe("automation scheduler decisions", () => {
     ).toEqual([independent.id]);
   });
 
+  it("conservatively serializes leading and partial-segment wildcard scopes", () => {
+    const global = task({ id: "global", stage: "running", changeScopes: ["**/*"] });
+    const partial = task({ id: "partial", stage: "running", changeScopes: ["Kanban*.tsx"] });
+    const web = task({
+      id: "web",
+      stage: "ready",
+      changeScopes: ["apps/web/src/KanbanBoard.tsx"],
+    });
+    const kanban = task({ id: "kanban", stage: "ready", changeScopes: ["KanbanBoard.tsx"] });
+
+    expect(automationConflictBlockers(web, [global])).toEqual([global]);
+    expect(automationConflictBlockers(kanban, [partial])).toEqual([partial]);
+  });
+
+  it("never schedules an archived automation task", () => {
+    const archived = task({
+      id: "archived",
+      stage: "ready",
+      archivedAt: "2026-08-03T12:00:00.000Z",
+    });
+
+    expect(selectRunnableAutomationTasks({ tasks: [archived], availableSlots: 1 })).toEqual([]);
+  });
+
   it("does not dispatch two conflicting ready tasks in one scheduling pass", () => {
     const first = task({ id: "first", stage: "ready", changeScopes: ["packages/contracts"] });
     const second = task({
@@ -581,6 +608,40 @@ describe("automation scheduler decisions", () => {
     ).toBe(true);
   });
 
+  it("does not expire a dispatch that completed before reconciliation observed it", () => {
+    const running = task({ id: "fast-completion", stage: "running" });
+    const heartbeat = "2026-08-03T12:00:00.000Z";
+    const completed: OrchestrationThread = {
+      ...running,
+      automation: { ...running.automation!, lastHeartbeatAt: heartbeat },
+      session: {
+        threadId: running.id,
+        status: "ready",
+        providerName: "codex",
+        runtimeMode: "full-access",
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: "2026-08-03T12:00:30.000Z",
+      },
+      checkpoints: [
+        {
+          turnId: TurnId.make("fast-turn"),
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make("refs/t3/checkpoints/fast-turn"),
+          status: "ready",
+          files: [],
+          assistantMessageId: null,
+          completedAt: "2026-08-03T12:00:30.000Z",
+        },
+      ],
+    };
+
+    expect(automationDispatchAdoptionDeadline(completed)).toBeNull();
+    expect(
+      automationDispatchStartExpired({ thread: completed, now: "2026-08-03T12:10:00.000Z" }),
+    ).toBe(false);
+  });
+
   it("retries transient failures but stops on permanent repository setup failures", () => {
     expect(automationFailureCanRetry("The provider process exited unexpectedly.")).toBe(true);
     expect(automationFailureCanRetry("The autonomous run exceeded its runtime limit.")).toBe(true);
@@ -721,5 +782,128 @@ describe("automation scheduler decisions", () => {
     };
 
     expect(automationDispatchCompletion(completed)).toBeNull();
+  });
+
+  it("uses the first checkpoint after dispatch so late subagent checkpoints cannot replace it", () => {
+    const running = task({ id: "checkpoint-order", stage: "running" });
+    const first = {
+      turnId: TurnId.make("parent-turn"),
+      checkpointTurnCount: 1,
+      checkpointRef: CheckpointRef.make("refs/t3/checkpoints/parent-turn"),
+      status: "ready" as const,
+      files: [],
+      assistantMessageId: null,
+      completedAt: "2026-08-03T12:01:00.000Z",
+    };
+    const lateChild = {
+      ...first,
+      turnId: TurnId.make("child-turn"),
+      checkpointRef: CheckpointRef.make("refs/t3/checkpoints/child-turn"),
+      completedAt: "2026-08-03T12:02:00.000Z",
+    };
+    const completed: OrchestrationThread = {
+      ...running,
+      checkpoints: [lateChild, first],
+      automation: {
+        ...running.automation!,
+        lastHeartbeatAt: "2026-08-03T12:00:00.000Z",
+      },
+    };
+
+    expect(automationDispatchCompletion(completed)).toEqual(first);
+  });
+
+  it("keeps a dispatch open until nested subagents reach terminal states", () => {
+    const running = task({ id: "nested-agents", stage: "running" });
+    const withActivities: OrchestrationThread = {
+      ...running,
+      automation: {
+        ...running.automation!,
+        lastHeartbeatAt: "2026-08-03T12:00:00.000Z",
+      },
+      activities: [
+        {
+          id: EventId.make("spawn-child"),
+          kind: "tool.started",
+          tone: "tool",
+          summary: "Spawn child",
+          turnId: TurnId.make("parent-turn"),
+          payload: {
+            itemType: "collab_agent_tool_call",
+            collab: {
+              tool: "spawnAgent",
+              receiverThreadIds: ["child"],
+              agentsStates: { child: { status: "running" } },
+            },
+          },
+          sequence: 1,
+          createdAt: "2026-08-03T12:00:10.000Z",
+        },
+        {
+          id: EventId.make("spawn-grandchild"),
+          kind: "tool.started",
+          tone: "tool",
+          summary: "Spawn grandchild",
+          turnId: TurnId.make("parent-turn"),
+          payload: {
+            itemType: "collab_agent_tool_call",
+            collab: {
+              tool: "spawnAgent",
+              receiverThreadIds: ["grandchild"],
+              agentsStates: { grandchild: { status: "running" } },
+            },
+          },
+          sequence: 2,
+          createdAt: "2026-08-03T12:00:20.000Z",
+        },
+        {
+          id: EventId.make("finish-child"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Child finished",
+          turnId: TurnId.make("parent-turn"),
+          payload: {
+            itemType: "collab_agent_tool_call",
+            collab: {
+              tool: "wait",
+              receiverThreadIds: ["child"],
+              agentsStates: { child: { status: "completed" } },
+            },
+          },
+          sequence: 3,
+          createdAt: "2026-08-03T12:00:30.000Z",
+        },
+      ],
+    };
+
+    expect(automationHasActiveSubagents(withActivities)).toBe(true);
+    expect(
+      automationHasActiveSubagents({
+        ...withActivities,
+        activities: [
+          ...withActivities.activities,
+          {
+            id: EventId.make("finish-grandchild"),
+            kind: "tool.completed",
+            tone: "tool",
+            summary: "Grandchild finished",
+            turnId: TurnId.make("parent-turn"),
+            payload: {
+              itemType: "collab_agent_tool_call",
+              data: {
+                item: {
+                  type: "subAgentActivity",
+                  kind: "completed",
+                  agentThreadId: "grandchild",
+                  agentPath: "/root/child/grandchild",
+                },
+              },
+            },
+            sequence: 4,
+            createdAt: "2026-08-03T12:00:40.000Z",
+          },
+        ],
+      }),
+    ).toBe(false);
   });
 });

@@ -148,6 +148,7 @@ describe("ProviderCommandReactor", () => {
     readonly requiresNewThreadForModelChange?: boolean;
     readonly titleRegenerationCompletionDispatchFailures?: number;
     readonly titleRegenerationBeforeStart?: "one" | "two";
+    readonly automated?: boolean;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -443,6 +444,46 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
       }),
     );
+    if (input?.automated === true) {
+      await Effect.runPromise(
+        engine.dispatch({
+          type: "thread.automation.configure",
+          commandId: CommandId.make("cmd-thread-automation-configure"),
+          threadId: ThreadId.make("thread-1"),
+          automation: {
+            taskKind: "implementation",
+            workflowId: ThreadId.make("workflow-1"),
+            workflowTaskKey: "worker-1",
+            role: "worker",
+            goal: "Complete the automated task.",
+            acceptanceCriteria: ["The task is complete."],
+            dependencies: [],
+            changeScopes: ["src/**"],
+            baseBranch: "main",
+            stage: "running",
+            phase: "implementation",
+            attempt: 1,
+            maxAttempts: 2,
+            maxRuntimeMinutes: 60,
+            leaseExpiresAt: null,
+            lastHeartbeatAt: now,
+            lastError: null,
+            feedback: null,
+            verification: {
+              status: "pending",
+              summary: null,
+              evidence: [],
+              completedAt: null,
+            },
+            startedAt: now,
+            completedAt: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+          updatedAt: now,
+        }),
+      );
+    }
     if (input?.titleRegenerationBeforeStart === "two") {
       await Effect.runPromise(
         engine.dispatch({
@@ -2248,6 +2289,78 @@ describe("ProviderCommandReactor", () => {
         detail: expect.stringContaining("cannot switch to 'claudeAgent'"),
       },
     });
+  });
+
+  it("starts a fresh provider driver for an idle autonomous role transition", async () => {
+    const harness = await createHarness({ automated: true });
+    const firstAt = "2026-01-01T00:00:00.000Z";
+    const secondAt = "2026-01-01T00:01:00.000Z";
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-automation-provider-switch-1"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("automation-provider-switch-1"),
+          role: "user",
+          text: "implement",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: firstAt,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-automation-provider-ready"),
+        threadId: ThreadId.make("thread-1"),
+        session: {
+          threadId: ThreadId.make("thread-1"),
+          status: "ready",
+          providerName: "codex",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: secondAt,
+        },
+        createdAt: secondAt,
+      }),
+    );
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-automation-provider-switch-2"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("automation-provider-switch-2"),
+          role: "user",
+          text: "verify",
+          attachments: [],
+        },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-6",
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: secondAt,
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    await harness.drain();
+    expect(harness.startSession.mock.calls.length).toBe(2);
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      provider: "claudeAgent",
+      providerInstanceId: "claudeAgent",
+    });
+    expect(harness.startSession.mock.calls[1]?.[1]).not.toHaveProperty("resumeCursor");
   });
 
   it("rejects cross-driver provider changes after the existing thread session has stopped", async () => {

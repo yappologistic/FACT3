@@ -1248,6 +1248,38 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
         assert.equal(yield* fileSystem.exists(worktreePath), false);
       }),
     );
+
+    it.effect("creates sibling worktrees concurrently without racing repository config", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const { initialBranch } = yield* initRepoWithCommit(cwd);
+        const pathService = yield* Path.Path;
+        const worktreesRoot = yield* makeTmpDir("git-concurrent-worktrees-");
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const inputs = Array.from({ length: 4 }, (_, index) => ({
+          cwd,
+          path: pathService.join(worktreesRoot, `worker-${index}`),
+          refName: initialBranch,
+          newRefName: `t3code/concurrent-${index}`,
+          baseRefName: initialBranch,
+        }));
+
+        const created = yield* Effect.all(
+          inputs.map((input) => driver.createWorktree(input)),
+          { concurrency: "unbounded" },
+        );
+
+        assert.equal(created.length, inputs.length);
+        for (const [index, result] of created.entries()) {
+          assert.equal(result.worktree.refName, `t3code/concurrent-${index}`);
+          assert.equal(
+            yield* git(cwd, ["config", `branch.t3code/concurrent-${index}.gh-merge-base`]),
+            initialBranch,
+          );
+        }
+      }),
+    );
   });
 
   describe("remote operations", () => {

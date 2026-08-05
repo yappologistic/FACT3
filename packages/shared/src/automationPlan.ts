@@ -37,6 +37,27 @@ export interface AutomationVerificationReport {
   readonly checks: ReadonlyArray<AutomationVerificationReportCheck>;
 }
 
+export interface AutomationFinalAuditReport {
+  readonly status: "complete" | "repair-required" | "needs-input";
+  readonly summary: string;
+  readonly failedCriteria: ReadonlyArray<string>;
+  readonly remainingRisks: ReadonlyArray<string>;
+  readonly followUpTasks: ReadonlyArray<{
+    readonly title: string;
+    readonly goal: string;
+    readonly role: AutomationPlanTaskRole;
+  }>;
+}
+
+export interface AutomationIntegrationReport {
+  readonly status: "integrated" | "failed" | "needs-input";
+  readonly summary: string;
+  readonly mergedBranches: ReadonlyArray<string>;
+  readonly conflictsResolved: ReadonlyArray<{ readonly path: string; readonly resolution: string }>;
+  readonly evidence: ReadonlyArray<AutomationVerificationReportCheck>;
+  readonly remainingRisks: ReadonlyArray<string>;
+}
+
 const MAX_PLAN_TASKS = 8;
 const MAX_SUMMARY_LENGTH = 2_000;
 const MAX_TASK_KEY_LENGTH = 128;
@@ -50,7 +71,7 @@ const MAX_CHANGE_SCOPE_LENGTH = 512;
 const MAX_VERIFICATION_CHECKS = 24;
 const MAX_VERIFICATION_CHECK_LENGTH = 1_000;
 const MAX_VERIFICATION_DETAIL_LENGTH = 2_000;
-const RESERVED_AUTOMATION_TASK_KEYS = new Set(["__integration__"]);
+const RESERVED_AUTOMATION_TASK_KEYS = new Set(["__integration__", "__final_audit__"]);
 
 function boundedString(value: unknown, maximum: number): string | null {
   if (typeof value !== "string") return null;
@@ -275,4 +296,126 @@ export function parseAutomationVerificationReport(
   }
   if (new Set(checks.map((check) => check.check)).size !== checks.length) return null;
   return { status, summary, checks };
+}
+
+/**
+ * A verifier must identify every acceptance criterion explicitly. Requiring an
+ * exact normalized label prevents a generic successful command from being
+ * mistaken for evidence that an unrelated product criterion was inspected.
+ */
+export function automationVerificationCoversCriteria(
+  report: AutomationVerificationReport,
+  criteria: ReadonlyArray<string>,
+): boolean {
+  const normalize = (value: string) => value.trim().replace(/\s+/g, " ").toLowerCase();
+  const labels = new Set(report.checks.map((check) => normalize(check.check)));
+  return criteria.every((criterion) => labels.has(normalize(criterion)));
+}
+
+/** Decode the final orchestrator verdict for an integrated workflow. */
+export function parseAutomationFinalAuditReport(text: string): AutomationFinalAuditReport | null {
+  const record = parseJsonObject(text);
+  if (record === null) return null;
+  const status =
+    record.status === "complete" ||
+    record.status === "repair-required" ||
+    record.status === "needs-input"
+      ? record.status
+      : null;
+  const summary = boundedString(record.summary, MAX_SUMMARY_LENGTH);
+  const failedCriteria = boundedStringArray(
+    record.failedCriteria,
+    MAX_ACCEPTANCE_CRITERIA,
+    MAX_ACCEPTANCE_CRITERION_LENGTH,
+  );
+  const remainingRisks = boundedStringArray(
+    record.remainingRisks,
+    MAX_VERIFICATION_CHECKS,
+    MAX_VERIFICATION_DETAIL_LENGTH,
+  );
+  if (
+    status === null ||
+    summary === null ||
+    failedCriteria === null ||
+    remainingRisks === null ||
+    !Array.isArray(record.followUpTasks) ||
+    record.followUpTasks.length > MAX_PLAN_TASKS
+  ) {
+    return null;
+  }
+
+  const followUpTasks: AutomationFinalAuditReport["followUpTasks"][number][] = [];
+  for (const value of record.followUpTasks) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+    const task = value as Record<string, unknown>;
+    const title = boundedString(task.title, MAX_TASK_TITLE_LENGTH);
+    const goal = boundedString(task.goal, MAX_TASK_GOAL_LENGTH);
+    const role =
+      typeof task.role === "string" &&
+      AUTOMATION_PLAN_TASK_ROLES.includes(task.role as AutomationPlanTaskRole)
+        ? (task.role as AutomationPlanTaskRole)
+        : null;
+    if (title === null || goal === null || role === null) return null;
+    followUpTasks.push({ title, goal, role });
+  }
+
+  if (status === "complete" && failedCriteria.length > 0) return null;
+  if (status === "repair-required" && failedCriteria.length === 0) return null;
+  return { status, summary, failedCriteria, remainingRisks, followUpTasks };
+}
+
+/** Decode the integration agent's structured result instead of trusting turn completion. */
+export function parseAutomationIntegrationReport(text: string): AutomationIntegrationReport | null {
+  const record = parseJsonObject(text);
+  if (record === null) return null;
+  const status =
+    record.status === "integrated" || record.status === "failed" || record.status === "needs-input"
+      ? record.status
+      : null;
+  const summary = boundedString(record.summary, MAX_SUMMARY_LENGTH);
+  const mergedBranches = boundedStringArray(
+    record.mergedBranches,
+    MAX_DEPENDENCIES,
+    MAX_CHANGE_SCOPE_LENGTH,
+    { unique: true },
+  );
+  const remainingRisks = boundedStringArray(
+    record.remainingRisks,
+    MAX_VERIFICATION_CHECKS,
+    MAX_VERIFICATION_DETAIL_LENGTH,
+  );
+  if (
+    status === null ||
+    summary === null ||
+    mergedBranches === null ||
+    remainingRisks === null ||
+    !Array.isArray(record.conflictsResolved) ||
+    record.conflictsResolved.length > MAX_VERIFICATION_CHECKS ||
+    !Array.isArray(record.evidence) ||
+    record.evidence.length === 0 ||
+    record.evidence.length > MAX_VERIFICATION_CHECKS
+  ) {
+    return null;
+  }
+
+  const conflictsResolved: AutomationIntegrationReport["conflictsResolved"][number][] = [];
+  for (const value of record.conflictsResolved) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+    const conflict = value as Record<string, unknown>;
+    const path = boundedString(conflict.path, MAX_CHANGE_SCOPE_LENGTH);
+    const resolution = boundedString(conflict.resolution, MAX_VERIFICATION_DETAIL_LENGTH);
+    if (path === null || resolution === null) return null;
+    conflictsResolved.push({ path, resolution });
+  }
+
+  const evidence: AutomationVerificationReportCheck[] = [];
+  for (const value of record.evidence) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+    const item = value as Record<string, unknown>;
+    const check = boundedString(item.check, MAX_VERIFICATION_CHECK_LENGTH);
+    const detail = boundedString(item.detail, MAX_VERIFICATION_DETAIL_LENGTH);
+    if (check === null || detail === null) return null;
+    evidence.push({ check, detail });
+  }
+  return { status, summary, mergedBranches, conflictsResolved, evidence, remainingRisks };
 }

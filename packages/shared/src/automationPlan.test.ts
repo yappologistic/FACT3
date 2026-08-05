@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { parseAutomationPlan, parseAutomationVerificationReport } from "./automationPlan.ts";
+import {
+  automationVerificationCoversCriteria,
+  parseAutomationFinalAuditReport,
+  parseAutomationIntegrationReport,
+  parseAutomationPlan,
+  parseAutomationVerificationReport,
+} from "./automationPlan.ts";
 
 const workerTask = {
   key: "api",
@@ -120,8 +126,82 @@ No work has been started.`);
       name: "the reserved integration task key",
       plan: { summary: "Invalid", tasks: [{ ...workerTask, key: "__integration__" }] },
     },
+    {
+      name: "the reserved final audit task key",
+      plan: { summary: "Invalid", tasks: [{ ...workerTask, key: "__final_audit__" }] },
+    },
   ])("rejects $name", ({ plan }) => {
     expect(parseAutomationPlan(JSON.stringify(plan))).toBeNull();
+  });
+});
+
+describe("parseAutomationFinalAuditReport", () => {
+  it("decodes a complete final audit", () => {
+    expect(
+      parseAutomationFinalAuditReport(
+        JSON.stringify({
+          status: "complete",
+          summary: "The integrated objective is complete.",
+          failedCriteria: [],
+          remainingRisks: ["Manual release remains outside this workflow."],
+          followUpTasks: [],
+        }),
+      ),
+    ).toMatchObject({ status: "complete", failedCriteria: [] });
+  });
+
+  it("rejects contradictory and incomplete final verdicts", () => {
+    expect(
+      parseAutomationFinalAuditReport(
+        JSON.stringify({
+          status: "complete",
+          summary: "Contradictory.",
+          failedCriteria: ["A criterion failed."],
+          remainingRisks: [],
+          followUpTasks: [],
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      parseAutomationFinalAuditReport(
+        JSON.stringify({
+          status: "repair-required",
+          summary: "Missing failures.",
+          failedCriteria: [],
+          remainingRisks: [],
+          followUpTasks: [],
+        }),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("parseAutomationIntegrationReport", () => {
+  it("requires a structured verdict with concrete evidence", () => {
+    expect(
+      parseAutomationIntegrationReport(
+        JSON.stringify({
+          status: "integrated",
+          summary: "Merged both branches.",
+          mergedBranches: ["t3code/api", "t3code/web"],
+          conflictsResolved: [],
+          evidence: [{ check: "Focused tests", detail: "Passed 12 tests." }],
+          remainingRisks: [],
+        }),
+      ),
+    ).toMatchObject({ status: "integrated", mergedBranches: ["t3code/api", "t3code/web"] });
+    expect(
+      parseAutomationIntegrationReport(
+        JSON.stringify({
+          status: "integrated",
+          summary: "No evidence.",
+          mergedBranches: [],
+          conflictsResolved: [],
+          evidence: [],
+          remainingRisks: [],
+        }),
+      ),
+    ).toBeNull();
   });
 });
 
@@ -186,5 +266,26 @@ The worktree is clean.`);
       summary: "The focused API test failed.",
       checks: [{ check: "Project API test", detail: "Expected 200 but received 500." }],
     });
+  });
+
+  it("requires explicit evidence for every acceptance criterion", () => {
+    const report = {
+      status: "passed" as const,
+      summary: "Verified.",
+      checks: [
+        { check: "The API returns persisted projects.", detail: "Observed a 200 response." },
+        { check: "Focused test", detail: "Passed." },
+      ],
+    };
+
+    expect(
+      automationVerificationCoversCriteria(report, [" The API returns persisted projects. "]),
+    ).toBe(true);
+    expect(
+      automationVerificationCoversCriteria(report, [
+        "The API returns persisted projects.",
+        "The UI renders the projects.",
+      ]),
+    ).toBe(false);
   });
 });

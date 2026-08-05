@@ -157,7 +157,7 @@ export function buildAutomationPrompt(input: {
       recovery,
       "Inspect the implementation already present in this worktree. Run the smallest relevant tests and static checks, verify every acceptance criterion, and inspect the diff for regressions. Do not modify the implementation to make it pass; report repair work explicitly so a worker can own it.",
       'Return only one fenced JSON block with this exact shape: {"status":"passed|failed","summary":"one sentence","checks":[{"check":"command, criterion, or inspection","detail":"observable result"}]}.',
-      "Include one check for every acceptance criterion and every command you ran. Set status=failed when any criterion or required check is unmet. A successful command exit or a completed agent turn is not, by itself, proof that the task is correct; the check detail must state the observable result.",
+      "Include one check for every acceptance criterion and every command you ran. For criterion evidence, copy the acceptance criterion text exactly into `check`. Set status=failed when any criterion or required check is unmet. A successful command exit or a completed agent turn is not, by itself, proof that the task is correct; the check detail must state the observable result.",
     ]
       .filter((part): part is string => Boolean(part))
       .join("\n\n");
@@ -342,6 +342,7 @@ export function selectRunnableAutomationTasks(input: {
     if (selected.length >= input.availableSlots) break;
     if (
       thread.automation?.stage !== "ready" ||
+      thread.archivedAt !== null ||
       thread.session?.status === "starting" ||
       thread.session?.status === "running" ||
       thread.latestTurn?.state === "running" ||
@@ -355,24 +356,44 @@ export function selectRunnableAutomationTasks(input: {
   return selected;
 }
 
-function normalizedScopePrefix(scope: string): string | null {
+interface NormalizedScopePrefix {
+  readonly prefix: string;
+  readonly wildcardStartsSegment: boolean;
+}
+
+function normalizedScopePrefix(scope: string): NormalizedScopePrefix | null {
   const normalized = scope.trim().replaceAll("\\", "/").replace(/^\.\//, "");
   const wildcard = normalized.search(/[?*{[]/);
-  const prefix = (wildcard === -1 ? normalized : normalized.slice(0, wildcard))
-    .replace(/\/+$/, "")
-    .trim();
-  return prefix.length > 0 ? prefix.toLowerCase() : null;
+  const rawPrefix = wildcard === -1 ? normalized : normalized.slice(0, wildcard);
+  const prefix = rawPrefix.replace(/\/+$/, "").trim();
+  return prefix.length > 0
+    ? {
+        prefix: prefix.toLowerCase(),
+        wildcardStartsSegment: wildcard !== -1 && (wildcard === 0 || rawPrefix.endsWith("/")),
+      }
+    : null;
+}
+
+function scopePrefixesOverlap(left: NormalizedScopePrefix, right: NormalizedScopePrefix): boolean {
+  if (
+    left.prefix === right.prefix ||
+    left.prefix.startsWith(`${right.prefix}/`) ||
+    right.prefix.startsWith(`${left.prefix}/`)
+  ) {
+    return true;
+  }
+  if (!left.wildcardStartsSegment && right.prefix.startsWith(left.prefix)) return true;
+  if (!right.wildcardStartsSegment && left.prefix.startsWith(right.prefix)) return true;
+  return false;
 }
 
 function scopesOverlap(left: string, right: string): boolean {
   const leftPrefix = normalizedScopePrefix(left);
   const rightPrefix = normalizedScopePrefix(right);
-  if (leftPrefix === null || rightPrefix === null) return false;
-  return (
-    leftPrefix === rightPrefix ||
-    leftPrefix.startsWith(`${rightPrefix}/`) ||
-    rightPrefix.startsWith(`${leftPrefix}/`)
-  );
+  // A leading wildcard has no safe disjoint prefix. Serialize it with every
+  // other active scope instead of risking concurrent edits to the same file.
+  if (leftPrefix === null || rightPrefix === null) return true;
+  return scopePrefixesOverlap(leftPrefix, rightPrefix);
 }
 
 export function automationConflictBlockers(
@@ -439,8 +460,7 @@ export function automationNeedsStartupRecovery(thread: OrchestrationThread): boo
   return thread.latestTurn === null || thread.latestTurn.state === "running";
 }
 
-// Provider starts are intentionally serialized by the provider command reactor. Give a
-// concurrently scheduled workflow enough time for the final start command to be adopted
+// Give a queued workflow enough time for its provider start to be adopted
 // before treating the durable queue entry as abandoned.
 const AUTOMATION_DISPATCH_ADOPTION_GRACE = { minutes: 5 } as const;
 
@@ -453,10 +473,14 @@ export function automationDispatchAdoptionDeadline(thread: OrchestrationThread):
       ? thread.latestTurn
       : null;
   const sessionAdopted =
-    (thread.session?.status === "starting" || thread.session?.status === "running") &&
+    thread.session !== null &&
+    thread.session.status !== "stopped" &&
     thread.session.updatedAt >= heartbeat;
   const turnAdopted = currentTurn !== null;
-  if (sessionAdopted || turnAdopted) return null;
+  const checkpointAdopted = thread.checkpoints.some(
+    (checkpoint) => checkpoint.completedAt >= heartbeat,
+  );
+  if (sessionAdopted || turnAdopted || checkpointAdopted) return null;
   return DateTime.formatIso(
     DateTime.add(DateTime.makeUnsafe(heartbeat), AUTOMATION_DISPATCH_ADOPTION_GRACE),
   );
@@ -698,6 +722,87 @@ export function automationDispatchCompletion(thread: OrchestrationThread) {
   return (
     thread.checkpoints
       .filter((checkpoint) => checkpoint.completedAt >= lastHeartbeatAt)
-      .toSorted((left, right) => right.completedAt.localeCompare(left.completedAt))[0] ?? null
+      .toSorted((left, right) => left.completedAt.localeCompare(right.completedAt))[0] ?? null
   );
+}
+
+function automationActivityRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function automationActivityString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+const ACTIVE_SUBAGENT_STATUSES = new Set(["pendingInit", "running", "inProgress", "started"]);
+const TERMINAL_SUBAGENT_STATUSES = new Set([
+  "completed",
+  "shutdown",
+  "finished",
+  "failed",
+  "error",
+  "errored",
+  "interrupted",
+  "stopped",
+  "cancelled",
+  "closed",
+]);
+
+/** Returns true while any child or nested child from the current dispatch is live. */
+export function automationHasActiveSubagents(thread: OrchestrationThread): boolean {
+  const heartbeat = thread.automation?.lastHeartbeatAt;
+  if (!heartbeat) return false;
+  const activeById = new Map<string, boolean>();
+
+  for (const activity of thread.activities
+    .filter((candidate) => candidate.createdAt >= heartbeat)
+    .toSorted((left, right) => {
+      if (left.sequence !== undefined && right.sequence !== undefined) {
+        return left.sequence - right.sequence;
+      }
+      return left.createdAt.localeCompare(right.createdAt);
+    })) {
+    const payload = automationActivityRecord(activity.payload);
+    if (automationActivityString(payload?.itemType) !== "collab_agent_tool_call") continue;
+    const data = automationActivityRecord(payload?.data);
+    const item = automationActivityRecord(data?.item) ?? data;
+    const collab = automationActivityRecord(payload?.collab);
+    const tool = automationActivityString(collab?.tool) ?? automationActivityString(item?.tool);
+    const directId = automationActivityString(item?.agentThreadId);
+    const directPath = automationActivityString(item?.agentPath);
+    const receiverIds = new Set<string>();
+    for (const candidate of [collab?.receiverThreadIds, item?.receiverThreadIds]) {
+      if (!Array.isArray(candidate)) continue;
+      for (const value of candidate) {
+        const id = automationActivityString(value);
+        if (id) receiverIds.add(id);
+      }
+    }
+    if (directId && directPath !== "/root") receiverIds.add(directId);
+
+    if (tool === "spawnAgent" || tool === "resumeAgent") {
+      for (const id of receiverIds) activeById.set(id, true);
+    }
+
+    for (const statesValue of [collab?.agentsStates, item?.agentsStates]) {
+      const states = automationActivityRecord(statesValue);
+      if (!states) continue;
+      for (const id of receiverIds) {
+        const state = automationActivityRecord(states[id]);
+        const status = automationActivityString(state?.status);
+        if (status && ACTIVE_SUBAGENT_STATUSES.has(status)) activeById.set(id, true);
+        if (status && TERMINAL_SUBAGENT_STATUSES.has(status)) activeById.set(id, false);
+      }
+    }
+
+    if (directId && automationActivityString(item?.type) === "subAgentActivity") {
+      const kind = automationActivityString(item?.kind);
+      if (kind && ACTIVE_SUBAGENT_STATUSES.has(kind)) activeById.set(directId, true);
+      if (kind && TERMINAL_SUBAGENT_STATUSES.has(kind)) activeById.set(directId, false);
+    }
+  }
+
+  return [...activeById.values()].some(Boolean);
 }

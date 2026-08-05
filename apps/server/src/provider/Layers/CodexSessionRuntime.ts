@@ -619,6 +619,21 @@ export function resolveCollabReceiverRoute(
   return collabReceiverTurns.get(providerConversationId);
 }
 
+export function codexSubagentTerminalKind(
+  status: "completed" | "interrupted" | "failed" | "inProgress",
+): "completed" | "interrupted" | "failed" | "started" {
+  switch (status) {
+    case "completed":
+      return "completed";
+    case "failed":
+      return "failed";
+    case "interrupted":
+      return "interrupted";
+    case "inProgress":
+      return "started";
+  }
+}
+
 function rememberCollabReceiverTurns(
   collabReceiverTurns: Map<string, CollabReceiverRoute>,
   notification: CodexServerNotification,
@@ -926,7 +941,7 @@ export const makeCodexSessionRuntime = (
         rememberCollabReceiverTurns(
           collabReceiverTurns,
           notification,
-          route.turnId,
+          childParentTurnId ?? route.turnId,
           mainProviderThreadId,
         );
 
@@ -982,9 +997,12 @@ export const makeCodexSessionRuntime = (
               item: {
                 id: childRoute.itemId,
                 type: "subAgentActivity",
-                kind: "interrupted",
+                kind: codexSubagentTerminalKind(notification.params.turn.status),
                 agentThreadId,
                 agentPath: childRoute.agentPath ?? agentThreadId,
+                ...(notification.params.turn.error?.message
+                  ? { message: notification.params.turn.error.message }
+                  : {}),
                 ...(metadata
                   ? {
                       model: metadata.model,

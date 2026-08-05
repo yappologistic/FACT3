@@ -10,13 +10,16 @@ import {
   type ProjectId,
 } from "@t3tools/contracts";
 import {
+  automationVerificationCoversCriteria,
+  parseAutomationFinalAuditReport,
+  parseAutomationIntegrationReport,
   parseAutomationPlan,
   parseAutomationVerificationReport,
   type AutomationPlan,
   type AutomationVerificationReport,
 } from "@t3tools/shared/automationPlan";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
-import { makeDrainableWorker } from "@t3tools/shared/DrainableWorker";
+import { makeKeyedCoalescingWorker } from "@t3tools/shared/KeyedCoalescingWorker";
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
@@ -40,6 +43,7 @@ import {
   automationDispatchCompletion,
   automationDispatchAdoptionDeadline,
   automationDispatchStartExpired,
+  automationHasActiveSubagents,
   automationIsStalled,
   automationNeedsStartupRecovery,
   automationRetryDecision,
@@ -465,16 +469,26 @@ const make = Effect.gen(function* () {
     );
     const integrationKey = "__integration__";
     const integrationId = workflowThreadId(input.root.id, integrationKey);
+    const finalAuditKey = "__final_audit__";
+    const finalAuditId = workflowThreadId(input.root.id, finalAuditKey);
     const threadSpecs = [
       ...input.plan.tasks.map((task) => ({
         id: taskIds.get(task.key)!,
         title: task.title,
         modelSelection: workflowConfig.roles[task.role],
+        runtimeMode: "full-access" as const,
       })),
       {
         id: integrationId,
         title: `Integrate: ${input.root.title}`,
         modelSelection: workflowConfig.roles.integrator,
+        runtimeMode: "full-access" as const,
+      },
+      {
+        id: finalAuditId,
+        title: `Final audit: ${input.root.title}`,
+        modelSelection: workflowConfig.roles.orchestrator,
+        runtimeMode: "approval-required" as const,
       },
     ];
     const acceptedIds = new Set<ThreadId>(threadSpecs.map((spec) => spec.id));
@@ -498,7 +512,7 @@ const make = Effect.gen(function* () {
         projectId: input.project.id,
         title: spec.title,
         modelSelection: spec.modelSelection,
-        runtimeMode: input.root.runtimeMode,
+        runtimeMode: spec.runtimeMode,
         interactionMode: "default",
         branch: rootAutomation.baseBranch,
         worktreePath: null,
@@ -615,42 +629,104 @@ const make = Effect.gen(function* () {
         projectId: input.project.id,
         acceptedIds,
       });
-      return;
-    }
-    yield* engine.dispatch({
-      type: "thread.automation.configure",
-      commandId: yield* serverCommandId("workflow-integration"),
-      threadId: integrationId,
-      automation: {
-        taskKind: "implementation",
-        workflowId: input.root.id,
-        workflowTaskKey: integrationKey,
-        role: "integrator",
-        goal: `Integrate every approved task for this project goal and resolve conflicts without discarding either intent.\n\n${rootAutomation.goal}\n\nPlan: ${input.plan.summary}`,
-        acceptanceCriteria: [
-          "Every planned task branch is merged into the integration branch.",
-          "The combined result is clean, committed, and passes focused integration checks.",
-        ],
-        dependencies: input.plan.tasks.map((task) => taskIds.get(task.key)!),
-        changeScopes: ["**/*"],
-        baseBranch: rootAutomation.baseBranch,
-        stage: "ready",
-        phase: "implementation",
-        attempt: 0,
-        maxAttempts: input.policy.defaultMaxAttempts,
-        maxRuntimeMinutes: input.policy.defaultMaxRuntimeMinutes,
-        leaseExpiresAt: null,
-        lastHeartbeatAt: null,
-        lastError: null,
-        feedback: null,
-        verification: { status: "pending", summary: null, evidence: [], completedAt: null },
-        startedAt: null,
-        completedAt: null,
-        createdAt,
+    } else {
+      yield* engine.dispatch({
+        type: "thread.automation.configure",
+        commandId: yield* serverCommandId("workflow-integration"),
+        threadId: integrationId,
+        automation: {
+          taskKind: "implementation",
+          workflowId: input.root.id,
+          workflowTaskKey: integrationKey,
+          role: "integrator",
+          goal: `Integrate every approved task for this project goal and resolve conflicts without discarding either intent.\n\n${rootAutomation.goal}\n\nPlan: ${input.plan.summary}`,
+          acceptanceCriteria: [
+            "Every planned task branch is merged into the integration branch.",
+            "The combined result is clean, committed, and passes focused integration checks.",
+          ],
+          dependencies: input.plan.tasks.map((task) => taskIds.get(task.key)!),
+          changeScopes: ["**/*"],
+          baseBranch: rootAutomation.baseBranch,
+          stage: "ready",
+          phase: "implementation",
+          attempt: 0,
+          maxAttempts: input.policy.defaultMaxAttempts,
+          maxRuntimeMinutes: input.policy.defaultMaxRuntimeMinutes,
+          leaseExpiresAt: null,
+          lastHeartbeatAt: null,
+          lastError: null,
+          feedback: null,
+          verification: { status: "pending", summary: null, evidence: [], completedAt: null },
+          startedAt: null,
+          completedAt: null,
+          createdAt,
+          updatedAt: createdAt,
+        },
         updatedAt: createdAt,
-      },
-      updatedAt: createdAt,
-    });
+      });
+    }
+
+    const finalAudit = (yield* snapshots.getCommandReadModel()).threads.find(
+      (thread) => thread.id === finalAuditId,
+    );
+    if (!finalAudit) {
+      return yield* new AutomationWorkflowMaterializationError({
+        message: "The final orchestrator audit was not projected after creation.",
+      });
+    }
+    if (finalAudit.automation) {
+      if (
+        finalAudit.automation.workflowId !== input.root.id ||
+        finalAudit.automation.workflowTaskKey !== finalAuditKey ||
+        finalAudit.automation.taskKind !== "implementation" ||
+        finalAudit.automation.role !== "orchestrator" ||
+        finalAudit.automation.goal !== rootAutomation.goal ||
+        finalAudit.automation.baseBranch !== rootAutomation.baseBranch ||
+        !sameStringArray(
+          finalAudit.automation.acceptanceCriteria,
+          rootAutomation.acceptanceCriteria,
+        ) ||
+        !sameStringArray(finalAudit.automation.dependencies, [integrationId]) ||
+        !sameStringArray(finalAudit.automation.changeScopes, []) ||
+        !sameModelSelection(finalAudit.modelSelection, workflowConfig.roles.orchestrator)
+      ) {
+        return yield* new AutomationWorkflowMaterializationError({
+          message: "This workflow's final orchestrator audit has a stale definition.",
+        });
+      }
+    } else {
+      yield* engine.dispatch({
+        type: "thread.automation.configure",
+        commandId: yield* serverCommandId("workflow-final-audit"),
+        threadId: finalAuditId,
+        automation: {
+          taskKind: "implementation",
+          workflowId: input.root.id,
+          workflowTaskKey: finalAuditKey,
+          role: "orchestrator",
+          goal: rootAutomation.goal,
+          acceptanceCriteria: rootAutomation.acceptanceCriteria,
+          dependencies: [integrationId],
+          changeScopes: [],
+          baseBranch: rootAutomation.baseBranch,
+          stage: "ready",
+          phase: "implementation",
+          attempt: 0,
+          maxAttempts: input.policy.defaultMaxAttempts,
+          maxRuntimeMinutes: input.policy.defaultMaxRuntimeMinutes,
+          leaseExpiresAt: null,
+          lastHeartbeatAt: null,
+          lastError: null,
+          feedback: null,
+          verification: { status: "pending", summary: null, evidence: [], completedAt: null },
+          startedAt: null,
+          completedAt: null,
+          createdAt,
+          updatedAt: createdAt,
+        },
+        updatedAt: createdAt,
+      });
+    }
     yield* retireStaleWorkflowThreads({
       workflowId: input.root.id,
       projectId: input.project.id,
@@ -871,6 +947,7 @@ const make = Effect.gen(function* () {
     yield* transition({
       thread: input.thread,
       stage: "failed",
+      phase: retryPhase,
       attempt: consumedAttempt,
       leaseExpiresAt: null,
       lastError: input.detail,
@@ -965,26 +1042,37 @@ const make = Effect.gen(function* () {
     };
     yield* scheduleLease(transitionedThread);
     yield* scheduleStuckCheck({ thread: transitionedThread, policy: input.policy });
-    yield* engine.dispatch({
-      type: "thread.turn.start",
-      commandId: yield* serverCommandId(`turn-${input.phase}`),
-      threadId: input.thread.id,
-      message: {
-        messageId: yield* messageId,
-        role: "user",
-        text: buildAutomationPrompt({
-          ...input,
-          thread: transitionedThread,
-          dependencyBranches,
-        }),
-        attachments: [],
-      },
-      modelSelection: workflowModelSelection(input.thread, input.phase, workflowRoot),
-      titleSeed: input.thread.title,
-      runtimeMode: input.thread.runtimeMode,
-      interactionMode: input.thread.interactionMode,
-      createdAt: startedAt,
-    });
+    yield* engine
+      .dispatch({
+        type: "thread.turn.start",
+        commandId: yield* serverCommandId(`turn-${input.phase}`),
+        threadId: input.thread.id,
+        message: {
+          messageId: yield* messageId,
+          role: "user",
+          text: buildAutomationPrompt({
+            ...input,
+            thread: transitionedThread,
+            dependencyBranches,
+          }),
+          attachments: [],
+        },
+        modelSelection: workflowModelSelection(input.thread, input.phase, workflowRoot),
+        titleSeed: input.thread.title,
+        runtimeMode: input.thread.runtimeMode,
+        interactionMode: input.thread.interactionMode,
+        createdAt: startedAt,
+      })
+      .pipe(
+        Effect.catchCause((cause) =>
+          retryOrFail({
+            thread: transitionedThread,
+            detail: Cause.pretty(cause),
+            attempt,
+            retryPhase: input.phase,
+          }),
+        ),
+      );
   });
 
   const finishSuccessfulRun = Effect.fn("AutomationReactor.finishSuccessfulRun")(function* (input: {
@@ -1004,7 +1092,7 @@ const make = Effect.gen(function* () {
       : undefined;
     const workflowConfig = (workflowRoot ?? input.thread).automation?.workflowConfig;
 
-    if (!planning) {
+    if (!planning && automation.role !== "orchestrator") {
       yield* validateCompletedTaskBranch(input.thread);
     }
     if (planning && workflowConfig?.mode === "automatic") {
@@ -1060,6 +1148,7 @@ const make = Effect.gen(function* () {
       (thread) =>
         thread.projectId === projectId &&
         thread.deletedAt === null &&
+        thread.archivedAt === null &&
         thread.automation !== undefined,
     );
 
@@ -1079,25 +1168,25 @@ const make = Effect.gen(function* () {
         automation.taskKind === "planning" &&
         automation.workflowConfig?.mode === "automatic"
       ) {
-        const integration = tasks.find(
+        const finalAudit = tasks.find(
           (candidate) =>
             candidate.automation?.workflowId === thread.id &&
-            candidate.automation.workflowTaskKey === "__integration__",
+            candidate.automation.workflowTaskKey === "__final_audit__",
         );
-        if (integration?.automation?.stage === "complete") {
+        if (finalAudit?.automation?.stage === "complete") {
           const completedAt = yield* nowIso;
           yield* transition({ thread, stage: "complete", completedAt });
         } else if (
-          integration?.automation?.stage === "failed" ||
-          integration?.automation?.stage === "cancelled"
+          finalAudit?.automation?.stage === "failed" ||
+          finalAudit?.automation?.stage === "cancelled"
         ) {
           const completedAt = yield* nowIso;
           yield* transition({
             thread,
             stage: "failed",
             lastError:
-              integration.automation.lastError ??
-              `The workflow integration task ended as ${integration.automation.stage}.`,
+              finalAudit.automation.lastError ??
+              `The workflow final audit ended as ${finalAudit.automation.stage}.`,
             completedAt,
           });
         }
@@ -1202,8 +1291,22 @@ const make = Effect.gen(function* () {
         continue;
       }
       if (automation.stage === "needs-input") {
-        if (!hasBlockingRequest(thread) && thread.session?.status === "running") {
-          yield* transition({ thread, stage: "running" });
+        if (!hasBlockingRequest(thread)) {
+          if (
+            thread.session?.status === "running" ||
+            thread.session?.status === "starting" ||
+            automationDispatchCompletion(thread) !== null
+          ) {
+            yield* transition({ thread, stage: "running" });
+          } else {
+            yield* retryOrFail({
+              thread,
+              detail:
+                thread.session?.lastError ??
+                "The blocking request was cleared after the provider turn stopped without a checkpoint.",
+              retryPhase: automation.phase,
+            });
+          }
         }
         continue;
       }
@@ -1276,7 +1379,8 @@ const make = Effect.gen(function* () {
       if (
         !checkpoint ||
         thread.session?.status === "running" ||
-        thread.session?.status === "starting"
+        thread.session?.status === "starting" ||
+        automationHasActiveSubagents(thread)
       ) {
         continue;
       }
@@ -1302,6 +1406,85 @@ const make = Effect.gen(function* () {
           phase: "verification",
         }).pipe(Effect.catchCause((cause) => retryOrFail({ thread, detail: Cause.pretty(cause) })));
         continue;
+      }
+      if (automation.role === "orchestrator" && automation.phase === "implementation") {
+        const reportText = latestAssistantText(thread);
+        const report = reportText ? parseAutomationFinalAuditReport(reportText) : null;
+        if (!report) {
+          yield* retryOrFail({
+            thread,
+            detail: "The final orchestrator did not return a valid structured audit verdict.",
+            retryPhase: "implementation",
+          });
+          continue;
+        }
+        if (report.status !== "complete") {
+          yield* retryOrFail({
+            thread,
+            detail: [
+              `Final orchestrator verdict: ${report.status}. ${report.summary}`,
+              ...report.failedCriteria.map((criterion) => `Failed criterion: ${criterion}`),
+              ...report.remainingRisks.map((risk) => `Remaining risk: ${risk}`),
+              ...report.followUpTasks.map(
+                (task) => `Follow-up (${task.role}): ${task.title} — ${task.goal}`,
+              ),
+            ].join("\n"),
+            retryPhase: "implementation",
+          });
+          continue;
+        }
+        const completedAt = yield* nowIso;
+        yield* finishSuccessfulRun({
+          thread,
+          project,
+          policy,
+          verification: {
+            status: "passed",
+            summary: report.summary,
+            evidence: [
+              { check: "Final orchestrator audit", detail: report.summary },
+              ...report.remainingRisks.map((risk) => ({
+                check: "Remaining risk",
+                detail: risk,
+              })),
+            ],
+            completedAt,
+          },
+        }).pipe(
+          Effect.catchCause((cause) =>
+            retryOrFail({
+              thread,
+              detail: Cause.pretty(cause),
+              retryPhase: "implementation",
+            }),
+          ),
+        );
+        continue;
+      }
+      if (automation.role === "integrator" && automation.phase === "implementation") {
+        const reportText = latestAssistantText(thread);
+        const report = reportText ? parseAutomationIntegrationReport(reportText) : null;
+        const expectedBranches = resolveAutomationDependencyBranches({ thread, tasks }).branches;
+        const reportedBranches = new Set(report?.mergedBranches ?? []);
+        if (
+          !report ||
+          report.status !== "integrated" ||
+          expectedBranches.some((branch) => !reportedBranches.has(branch))
+        ) {
+          yield* retryOrFail({
+            thread,
+            detail: report
+              ? [
+                  `Integration agent verdict: ${report.status}. ${report.summary}`,
+                  ...expectedBranches
+                    .filter((branch) => !reportedBranches.has(branch))
+                    .map((branch) => `Missing merged branch evidence: ${branch}`),
+                ].join("\n")
+              : "The integration agent did not return a valid structured integration report with concrete evidence.",
+            retryPhase: "implementation",
+          });
+          continue;
+        }
       }
       if (
         automation.taskKind !== "planning" &&
@@ -1357,6 +1540,15 @@ const make = Effect.gen(function* () {
         continue;
       }
       if (automation.phase === "verification") {
+        if (checkpoint.files.length > 0) {
+          yield* retryOrFail({
+            thread,
+            detail:
+              "The independent verifier modified implementation files. Verification must remain read-only; return the task to implementation and verify again from a clean checkpoint.",
+            retryPhase: "implementation",
+          });
+          continue;
+        }
         const reportText = latestAssistantText(thread);
         const report = reportText ? parseAutomationVerificationReport(reportText) : null;
         if (!report) {
@@ -1364,6 +1556,15 @@ const make = Effect.gen(function* () {
             thread,
             detail:
               "The verifier did not return a valid evidence report. Return status, summary, and concrete check details in the required JSON shape.",
+            retryPhase: "verification",
+          });
+          continue;
+        }
+        if (!automationVerificationCoversCriteria(report, automation.acceptanceCriteria)) {
+          yield* retryOrFail({
+            thread,
+            detail:
+              "The verifier report did not include an explicitly labeled evidence check for every acceptance criterion.",
             retryPhase: "verification",
           });
           continue;
@@ -1495,15 +1696,22 @@ const make = Effect.gen(function* () {
             }),
       ),
     );
-  const worker = yield* makeDrainableWorker(reconcileProjectSafely);
-  enqueueProject = worker.enqueue;
+  const worker = yield* makeKeyedCoalescingWorker({
+    merge: () => undefined,
+    process: reconcileProjectSafely,
+  });
+  enqueueProject = (projectId) => worker.enqueue(projectId, undefined);
 
   const projectIdForEvent = Effect.fn("AutomationReactor.projectIdForEvent")(function* (
     event: OrchestrationEvent,
   ) {
     if (event.aggregateKind === "project") return event.aggregateId as ProjectId;
-    const model = yield* snapshots.getCommandReadModel();
-    return model.threads.find((thread) => thread.id === event.aggregateId)?.projectId ?? null;
+    return Option.getOrNull(
+      Option.map(
+        yield* snapshots.getThreadShellById(event.aggregateId as ThreadId),
+        (thread) => thread.projectId,
+      ),
+    );
   });
 
   const shouldReconcile = (event: OrchestrationEvent): boolean =>
@@ -1514,7 +1722,8 @@ const make = Effect.gen(function* () {
     event.type === "thread.turn-diff-completed" ||
     event.type === "thread.activity-appended" ||
     event.type === "thread.approval-response-requested" ||
-    event.type === "thread.user-input-response-requested";
+    event.type === "thread.user-input-response-requested" ||
+    event.type === "thread.deleted";
 
   const start: AutomationReactorShape["start"] = Effect.fn("AutomationReactor.start")(function* () {
     yield* Effect.gen(function* () {
@@ -1571,7 +1780,7 @@ const make = Effect.gen(function* () {
           Stream.runForEach((event) =>
             projectIdForEvent(event).pipe(
               Effect.flatMap((projectId) =>
-                projectId === null ? Effect.void : worker.enqueue(projectId),
+                projectId === null ? Effect.void : worker.enqueue(projectId, undefined),
               ),
               Effect.catchCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
@@ -1589,7 +1798,7 @@ const make = Effect.gen(function* () {
       const refreshedModel = yield* snapshots.getCommandReadModel();
       yield* Effect.forEach(
         refreshedModel.projects.filter((project) => project.automationPolicy !== undefined),
-        (project) => worker.enqueue(project.id),
+        (project) => worker.enqueue(project.id, undefined),
         { discard: true },
       );
     }).pipe(

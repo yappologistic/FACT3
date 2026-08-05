@@ -29,6 +29,7 @@ import { OrchestrationEngineLive } from "./OrchestrationEngine.ts";
 import {
   ORCHESTRATION_PROJECTOR_NAMES,
   OrchestrationProjectionPipelineLive,
+  threadActivityAffectsShellSummary,
 } from "./ProjectionPipeline.ts";
 import { OrchestrationProjectionSnapshotQueryLive } from "./ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
@@ -43,6 +44,27 @@ const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
     Layer.provideMerge(NodeServices.layer),
   );
 
+it("only rescans shell activity state for activity kinds that can change it", () => {
+  assert.isFalse(
+    threadActivityAffectsShellSummary({
+      kind: "tool.updated",
+      payload: { itemType: "command_execution", detail: "more output" },
+    }),
+  );
+  assert.isTrue(
+    threadActivityAffectsShellSummary({
+      kind: "tool.started",
+      payload: { itemType: "collab_agent_tool_call" },
+    }),
+  );
+  assert.isTrue(
+    threadActivityAffectsShellSummary({
+      kind: "user-input.resolved",
+      payload: { requestId: "request-1" },
+    }),
+  );
+});
+
 const exists = (filePath: string) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -53,6 +75,64 @@ const exists = (filePath: string) =>
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer("t3-projection-pipeline-test-");
 
 it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
+  it.effect("bootstraps beyond the event store default page", () =>
+    Effect.gen(function* () {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline;
+      const eventStore = yield* OrchestrationEventStore;
+      const sql = yield* SqlClient.SqlClient;
+      const now = "2026-01-01T00:00:00.000Z";
+      const projectId = ProjectId.make("project-over-page");
+
+      yield* eventStore.append({
+        type: "project.created",
+        eventId: EventId.make("evt-over-page-0"),
+        aggregateKind: "project",
+        aggregateId: projectId,
+        occurredAt: now,
+        commandId: CommandId.make("cmd-over-page-0"),
+        causationEventId: null,
+        correlationId: CommandId.make("cmd-over-page-0"),
+        metadata: {},
+        payload: {
+          projectId,
+          title: "Project 0",
+          workspaceRoot: "/tmp/project-over-page",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      });
+      yield* Effect.forEach(
+        Array.from({ length: 1_000 }, (_, index) => index + 1),
+        (index) =>
+          eventStore.append({
+            type: "project.meta-updated",
+            eventId: EventId.make(`evt-over-page-${index}`),
+            aggregateKind: "project",
+            aggregateId: projectId,
+            occurredAt: now,
+            commandId: CommandId.make(`cmd-over-page-${index}`),
+            causationEventId: null,
+            correlationId: CommandId.make(`cmd-over-page-${index}`),
+            metadata: {},
+            payload: {
+              projectId,
+              title: `Project ${index}`,
+              updatedAt: now,
+            },
+          }),
+        { concurrency: 1, discard: true },
+      );
+
+      yield* projectionPipeline.bootstrap;
+      const rows = yield* sql<{ readonly title: string }>`
+        SELECT title FROM projection_projects WHERE project_id = ${projectId}
+      `;
+      assert.deepEqual(rows, [{ title: "Project 1000" }]);
+    }),
+  );
+
   it.effect("bootstraps all projection states and writes projection rows", () =>
     Effect.gen(function* () {
       const projectionPipeline = yield* OrchestrationProjectionPipeline;
